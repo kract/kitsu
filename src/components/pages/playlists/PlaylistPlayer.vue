@@ -552,7 +552,7 @@
         <button-sound
           class="flexrow-item playlist-button"
           @change-sound="onToggleSoundClicked"
-          v-model="isMuted"
+          v-model:muted="isMuted"
           v-model:volume="volume"
         />
         <button-simple
@@ -712,7 +712,7 @@
           :active="isZoomEnabled"
           icon="loupe"
           :title="$t('playlists.actions.annotation_zoom_pan')"
-          @click="isZoomEnabled = !isZoomEnabled"
+          @click="onPanZoomClicked()"
           v-if="isCurrentPreviewMovie || isCurrentPreviewPicture"
         />
         <transition name="slide">
@@ -961,7 +961,6 @@
 
     <notify-client-modal
       active
-      :playlist="playlist"
       :is-loading="loading.notifyClients"
       :is-error="errors.notifyClients"
       :is-success="success.notifyClients"
@@ -1482,14 +1481,15 @@ export default {
       this.errors.notifyClients = false
     },
 
-    async confirmNotifyClients({ studioId }) {
+    async confirmNotifyClients({ studioId, departmentId }) {
       this.loading.notifyClients = true
       this.errors.notifyClients = false
       this.success.notifyClients = false
       try {
         await this.notifyClients({
           playlist: this.playlist,
-          studioId
+          studioId,
+          departmentId
         })
         this.success.notifyClients = true
       } catch (err) {
@@ -1664,7 +1664,7 @@ export default {
 
       // we've seen all the frames the picture should be visible
       const previews = this.currentEntity.preview_file_previews
-      if (previews.length === this.currentPreviewIndex) {
+      if (previews && previews.length === this.currentPreviewIndex) {
         this.$nextTick(() => {
           this.onPlayNextEntity(true)
           this.framesSeenOfPicture = 1
@@ -2336,6 +2336,17 @@ export default {
     onEntityDragStart(event, entity) {
       event.dataTransfer.setData('entityId', entity.id)
       event.dataTransfer.setData('previewFileId', entity.preview_file_id)
+    },
+
+    onPanZoomClicked() {
+      if (!this.isZoomEnabled) {
+        this.isDrawing = false
+        this.isAnnotationsDisplayed = false
+        this.isZoomEnabled = true
+      } else {
+        this.isZoomEnabled = false
+        this.isAnnotationsDisplayed = true
+      }
     },
 
     resumePanZoom() {

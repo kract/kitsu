@@ -454,7 +454,9 @@ export default {
     const finalize = () => {
       this.$nextTick(() => {
         // Needed to be sure the current production is set
-        this.loadShots()
+        this.loadShots(() => {
+          this.initialLoading = false
+        })
       })
     }
 
@@ -796,7 +798,7 @@ export default {
 
     confirmAddThumbnails(forms) {
       const addPreview = form => {
-        this.addThumbnailsModal.markLoading(form.task.entity_id)
+        this.addThumbnailsModal?.markLoading(form.task.entity_id)
         return this.commentTaskWithPreview({
           taskId: form.task.id,
           commentText: '',
@@ -811,8 +813,7 @@ export default {
             })
           })
           .then(() => {
-            this.addThumbnailsModal.markUploaded(form.task.entity_id)
-            return Promise.resolve()
+            this.addThumbnailsModal?.markUploaded(form.task.entity_id)
           })
       }
       this.loading.addThumbnails = true

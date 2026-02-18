@@ -69,15 +69,6 @@
       </div>
 
       <div class="nav-right">
-        <a
-          class="nav-item kitsu-summit-button"
-          href="https://cg-wire.com/kitsu-summit"
-          target="_blank"
-          v-if="!isCurrentUserClient"
-        >
-          Kitsu Summit 2026
-        </a>
-
         <router-link
           class="nav-item"
           :to="{
@@ -198,6 +189,11 @@
             Roadmap / Feedback
           </a>
         </li>
+        <li>
+          <a href="https://dev.kitsu.cloud" target="_blank">
+            Developer documentation
+          </a>
+        </li>
         <hr />
         <li>
           <a href="https://cg-wire.com/about" target="_blank">
@@ -302,8 +298,9 @@ export default {
       'notifications',
       'openProductions',
       'organisation',
-      'productionMap',
       'productionEditTaskTypes',
+      'productionMap',
+      'projectPlugins',
       'user'
     ]),
 
@@ -369,10 +366,12 @@ export default {
     },
 
     isEpisodeContext() {
+      const isPlugin = this.$route.params.plugin_id !== undefined
       return (
         this.isTVShow &&
         this.hasEpisodeId &&
-        !['episodes', 'episode-stats'].includes(this.currentSectionOption) &&
+        (!['episodes', 'episode-stats'].includes(this.currentSectionOption) ||
+          isPlugin) &&
         // Do not display combobox if there is no episode
         this.episodes.length > 0
       )
@@ -484,6 +483,16 @@ export default {
         }
         options.push({ label: this.$t('people.team'), value: 'team' })
 
+        this.projectPlugins.forEach(plugin => {
+          options.push({
+            label: plugin.name,
+            value: plugin.plugin_id,
+            icon: plugin.icon,
+            plugin_id: plugin.plugin_id,
+            type: 'plugin'
+          })
+        })
+
         if (this.isCurrentUserManager) {
           options = options.concat([
             { label: 'separator', value: 'separator' },
@@ -551,6 +560,9 @@ export default {
     ]),
 
     getCurrentSectionFromRoute() {
+      if (this.$route.name.includes('production-plugin')) {
+        return this.$route.params.plugin_id
+      }
       if (this.$route.name === 'person') {
         return 'person'
       }
@@ -703,11 +715,13 @@ export default {
 
     updateCombosFromRoute() {
       const productionId = this.$route.params.production_id
+      const pluginId = this.$route.params.plugin_id
       const section = this.getCurrentSectionFromRoute()
       let episodeId = this.$route.params.episode_id
       this.silent = true
       this.currentProductionId = productionId
       this.currentProjectSection = section
+      this.currentPluginId = pluginId
       const isAssetSection = this.assetSections.includes(section)
       const isEditSection = this.editSections.includes(section)
       const isBreakdownSection = this.breakdownSections.includes(section)
@@ -715,17 +729,18 @@ export default {
         !isAssetSection &&
         !isEditSection &&
         !isBreakdownSection &&
-        ['all', 'main'].includes(episodeId)
+        ['all', 'main'].includes(episodeId) &&
+        this.episodes.length > 0
       ) {
         episodeId = this.episodes[0].id
         this.currentEpisodeId = episodeId
-        this.pushContextRoute(section)
+        this.pushContextRoute(section, pluginId)
       } else {
         this.currentEpisodeId = episodeId
       }
     },
 
-    pushContextRoute(section) {
+    pushContextRoute(section, pluginId = null) {
       const isAssetSection = this.assetSections.includes(section)
       const production = this.productionMap.get(this.currentProductionId)
       const isTVShow = production?.production_type === 'tvshow'
@@ -742,7 +757,8 @@ export default {
       let route = {
         name: section,
         params: {
-          production_id: this.currentProductionId
+          production_id: this.currentProductionId,
+          plugin_id: pluginId
         }
       }
       route = this.episodifyRoute(route, section, episodeId, isTVShow)
@@ -990,46 +1006,6 @@ export default {
 
 .notification-bell {
   margin-top: 9px;
-}
-
-.kitsu-summit-button {
-  align-items: center;
-  display: flex;
-  border: 2px solid transparent;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
-  margin: 8px;
-  text-transform: uppercase;
-
-  padding: 6px 16px;
-  position: relative;
-  transition: transform 0.2s ease;
-  z-index: 1;
-
-  &::before {
-    background: linear-gradient(135deg, #95ead0, #82d1b2, #6cb896);
-    border-radius: 20px;
-    content: '';
-    inset: -2px;
-    padding: 2px;
-    pointer-events: none;
-    position: absolute;
-    -webkit-mask:
-      linear-gradient(#fff 0 0) content-box,
-      linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    z-index: -1;
-    mask-composite: exclude;
-
-    .dark & {
-      background: linear-gradient(135deg, #41b883, #31855e, #1e5f3c);
-    }
-  }
-
-  &:hover {
-    transform: translateY(-3px);
-  }
 }
 
 @media screen and (max-width: 768px) {

@@ -11,6 +11,7 @@ import i18n from '@/lib/i18n'
 import resizableColumn from '@/directives/resizable-column'
 import router from '@/router'
 import store from '@/store'
+import { setupChunkErrorHandler } from '@/lib/chunk-error'
 
 import Autosize from 'v-autosize/src/plugin.js'
 import VueChartkick from 'vue-chartkick'
@@ -23,10 +24,7 @@ import '@animxyz/core'
 import VueDatePicker from '@vuepic/vue-datepicker'
 import '@vuepic/vue-datepicker/dist/main.css'
 
-const app = createApp({
-  components: { App },
-  template: '<App/>'
-})
+const app = createApp(App)
 const head = createHead()
 
 app.use(i18n)
@@ -56,5 +54,7 @@ app.directive('focus', {
 store.$socket = app.config.globalProperties.$socket
 
 app.config.compilerOptions.whitespace = 'preserve'
+
+setupChunkErrorHandler(router)
 
 app.mount('#app')

@@ -1237,6 +1237,10 @@ export const playerMixin = {
 
     resetCanvasSize() {
       return this.$nextTick().then(() => {
+        if (!this.zoomEnabled) {
+          this.resetPanZoom()
+        }
+
         if (this.isCurrentPreviewMovie && this.isAnnotationCanvas()) {
           if (this.canvas) {
             // Video Ratio
@@ -1276,7 +1280,7 @@ export const playerMixin = {
             const naturalHeight = naturalDimensions.height
             const ratio = naturalWidth / naturalHeight
 
-            if (!this.$refs['video-container']) return Promise.resolve()
+            if (!this.$refs['video-container']) return
 
             // Container size
             let fullWidth = this.$refs['video-container'].offsetWidth
@@ -1288,8 +1292,8 @@ export const playerMixin = {
             // Init canvas values
             let width = ratio ? fullHeight * ratio : fullWidth
             let height = ratio ? Math.round(fullWidth / ratio) : fullHeight
-            let top = 0
-            let left = 0
+            let top
+            let left
             this.canvas.style.top = '0px'
             this.canvas.style.left = '0px'
 
@@ -1334,7 +1338,6 @@ export const playerMixin = {
             this.setAnnotationCanvasDimensions(width, height)
           }
         }
-        return Promise.resolve()
       })
     },
 
@@ -1486,15 +1489,14 @@ export const playerMixin = {
       this.maxDuration = '00:00.000'
     },
 
-    resetPictureCanvas() {
-      if (!this.currentPreview) return Promise.resolve()
+    async resetPictureCanvas() {
+      if (!this.currentPreview) return
       this.annotations = this.currentPreview.annotations || []
-      return this.resetCanvas().then(() => {
-        this.resetCanvasVisibility()
-        if (this.isCurrentPreviewPicture) {
-          if (!this.isPlaying) this.loadAnnotation(this.getAnnotation(0))
-        }
-      })
+      await this.resetCanvas()
+      this.resetCanvasVisibility()
+      if (this.isCurrentPreviewPicture) {
+        if (!this.isPlaying) this.loadAnnotation(this.getAnnotation(0))
+      }
     },
 
     // Scrubbing

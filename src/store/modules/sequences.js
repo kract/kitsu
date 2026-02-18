@@ -365,7 +365,7 @@ const actions = {
         production,
         userFilters
       })
-      return Promise.resolve(sequences)
+      return sequences
     })
   },
 
@@ -380,6 +380,11 @@ const actions = {
     const taskMap = rootGetters.taskMap
     const taskStatusMap = rootGetters.taskStatusMap
     const taskTypeMap = rootGetters.taskTypeMap
+
+    if (!production) {
+      return []
+    }
+
     if (!episode && isTVShow) {
       if (rootGetters.episodes && rootGetters.episodes.length > 0) {
         episode = rootGetters.episodes[0]
@@ -395,7 +400,7 @@ const actions = {
           taskTypeMap,
           taskStatusMap
         })
-        return Promise.resolve([])
+        return []
       }
     }
     return shotsApi
@@ -418,7 +423,7 @@ const actions = {
             userFilters
           })
         }
-        return Promise.resolve(sequences)
+        return sequences
       })
   },
 
@@ -451,7 +456,7 @@ const actions = {
       )
       return func
         .runPromiseAsSeries(createTaskPromises)
-        .then(() => Promise.resolve(sequence))
+        .then(() => sequence)
         .catch(console.error)
     })
   },
@@ -469,7 +474,7 @@ const actions = {
   deleteSequence({ commit, state }, sequence) {
     return shotsApi.deleteSequence(sequence).then(() => {
       commit(REMOVE_SEQUENCE, sequence)
-      return Promise.resolve(sequence)
+      return sequence
     })
   },
 
@@ -486,7 +491,7 @@ const actions = {
         } else {
           commit(ADD_SEQUENCE, { sequence, episodeMap })
         }
-        return Promise.resolve(sequence)
+        return sequence
       })
       .catch(console.error)
   },
@@ -498,7 +503,7 @@ const actions = {
       .getSequenceStats(productionId)
       .then(sequenceStats => {
         commit(SET_SEQUENCE_STATS, { sequenceStats, taskTypeMap })
-        return Promise.resolve(sequenceStats)
+        return sequenceStats
       })
       .catch(console.error)
   },
@@ -519,7 +524,7 @@ const actions = {
           production,
           taskTypeMap
         })
-        return Promise.resolve(sequenceRetakeStats)
+        return sequenceRetakeStats
       })
       .catch(console.error)
   },

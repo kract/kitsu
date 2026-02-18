@@ -179,7 +179,7 @@
           <button-sound
             class="flexrow-item"
             @change-sound="onToggleSoundClicked"
-            v-model="isMuted"
+            v-model:muted="isMuted"
             v-model:volume="volume"
           />
 
@@ -560,7 +560,7 @@
 
 <script>
 import { fabric } from 'fabric'
-import { PSBrush } from '@arch-inc/fabricjs-psbrush'
+import { PSBrush } from 'fabricjs-psbrush'
 
 import {
   ArrowUpRightIcon,

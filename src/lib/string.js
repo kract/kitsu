@@ -46,6 +46,14 @@ export default {
     return str.charAt(0).toUpperCase() + str.slice(1)
   },
 
+  snakeToCamel(str) {
+    return str.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())
+  },
+
+  snakeToPascal(str) {
+    return this.capitalize(this.snakeToCamel(str))
+  },
+
   filenameWithoutExtension(filename) {
     return filename.replace(/\.[^/.]+$/, '')
   },

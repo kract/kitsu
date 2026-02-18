@@ -2,6 +2,7 @@ export default {
 
   assets: {
     cast_in: 'Cast in',
+    casted_in_shots: 'Casted in {nbShots} shots',
     cancel_text: 'Are you sure you want to archive {name}?',
     delete_error: 'An error occurred while deleting this asset. There may be existing data currently linked to it. Are you sure this asset type has no task linked to it?',
     delete_for_selection: 'Delete the selected asset | Delete the {nbSelectedAssets} selected assets',
@@ -351,7 +352,7 @@ export default {
   },
 
   departments: {
-    all_asset_types: 'All departments',
+    all_departments: 'All departments',
     available_items: 'Available Items',
     create_error: 'An error occurred while saving this department. Are you sure there is no department with a similar name?',
     delete_text: 'Are you sure you want to remove {name} from your database?',
@@ -375,6 +376,7 @@ export default {
   },
 
   studios: {
+    all_studios: 'All studios',
     create_error: 'An error occurred while saving this studio. Are you sure there is no studio with a similar name?',
     delete_text: 'Are you sure you want to remove {name} from your database?',
     delete_error: 'An error occurred while deleting this studio.',
@@ -700,6 +702,7 @@ export default {
     empty_comment: 'Empty comment',
     empty_schedule: 'There are no tasks or they don\'t have start dates.',
     end_date: 'End date',
+    entities: 'Entities',
     estimation: 'Estimation',
     estimation_short: 'Est.',
     expand_all: 'Expand all',
@@ -767,6 +770,7 @@ export default {
     reload: 'Reload',
     remaining: 'Remaining',
     reply: 'Reply',
+    shared_by: 'Shared by {name}',
     save: 'Save',
     search_query: 'Search query',
     search_query_edit: 'Edit search filter',
@@ -1038,7 +1042,6 @@ export default {
     add_sequence: 'Add entire sequence',
     add_episode: 'Add entire episode',
     add_movie: 'Add entire movie',
-    all_studios: 'All studios',
     apply_task_type_change: 'This will set the last revision for the given task type on all entities.',
     available_build: 'Available builds',
     build_daily: 'Daily pending',
@@ -1346,6 +1349,7 @@ export default {
     },
     two_factor_authentication: {
       title: 'Two-factor authentication',
+      enabled: 'Two-factor authentication enabled',
       scan_qrcode: 'Please scan this QR code in your TOTP application.',
       otp_secret: 'OTP secret',
       totp: {
@@ -1369,8 +1373,7 @@ export default {
         registered_devices_title: 'Registered FIDO devices:',
         button_register: 'Register new FIDO device',
         error_register: 'An error occurred while registering FIDO device.',
-        error_unregister: 'An error occurred while unregistering FIDO device.',
-        button_unregister: 'Validate and unregister FIDO device'
+        error_unregister: 'An error occurred while unregistering FIDO device.'
       },
       recovery_codes: {
         title: 'Recovery codes',

@@ -15,6 +15,7 @@
               isInDepartment ||
               isCurrentViewTodos) &&
             !isEntitySelection &&
+            !isCurrentViewConcept &&
             isTaskSelection
           "
         >
@@ -292,7 +293,12 @@
           class="menu-item"
           :title="$t('main.csv.export_file')"
           @click="$emit('export-task')"
-          v-if="isTaskSelection && !isEntitySelection && nbSelectedTasks === 1"
+          v-if="
+            isTaskSelection &&
+            !isEntitySelection &&
+            nbSelectedTasks === 1 &&
+            !isCurrentUserClient
+          "
         >
           <kitsu-icon name="export" :title="$t('main.csv.export_file')" />
         </div>
@@ -965,6 +971,7 @@ export default {
       'currentProduction',
       'getCustomActionsByType',
       'isCurrentUserArtist',
+      'isCurrentUserClient',
       'isCurrentUserManager',
       'isCurrentUserSupervisor',
       'isShowAssignations',
@@ -1351,14 +1358,12 @@ export default {
         .catch(console.error)
     },
 
-    confirmPriorityChange() {
+    async confirmPriorityChange() {
       this.loading.changePriority = true
-      this.changeSelectedPriorities({
-        priority: Number(this.priority),
-        callback: () => {
-          this.loading.changePriority = false
-        }
+      await this.changeSelectedPriorities({
+        priority: Number(this.priority)
       })
+      this.loading.changePriority = false
     },
 
     confirmTaskCreation() {

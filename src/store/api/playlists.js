@@ -24,8 +24,12 @@ export default {
     return client.pget(path)
   },
 
-  getRunningPreviewFiles() {
-    return client.pget('/api/data/playlists/preview-files/running')
+  getRunningPreviewFiles(limit, lastPreviewFileId = null) {
+    let path = `/api/data/playlists/preview-files/running?limit=${limit}`
+    if (lastPreviewFileId) {
+      path += `&cursor_preview_file_id=${lastPreviewFileId}`
+    }
+    return client.pget(path)
   },
 
   markPreviewFileAsBroken(previewFileId) {
@@ -90,8 +94,8 @@ export default {
     return client.ppost(path, { task_ids: taskIds })
   },
 
-  notifyClients(playlist, studioId) {
-    const data = { studio_id: studioId }
+  notifyClients(playlist, studioId, departmentId) {
+    const data = { studio_id: studioId, department_id: departmentId }
     return client.ppost(
       `/api/data/playlists/${playlist.id}/notify-clients`,
       data

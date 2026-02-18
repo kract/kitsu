@@ -8,20 +8,25 @@
         :label="$t('logs.current_date_label')"
         v-model="currentDate"
       />
+      <people-field
+        class="flexrow-item field"
+        :label="$t('main.user')"
+        :people="people"
+        v-model="selectedPerson"
+      />
       <button-simple
         class="flexrow-item small"
         icon="refresh"
-        @click="loadDayEvents"
+        :is-loading="loading.events"
+        :title="$t('main.reload')"
+        @click="loadDayEvents()"
       />
-      <span class="flexrow-item nb-events">
-        {{ events.length }} {{ $t('logs.events') }}
-      </span>
     </div>
 
-    <div class="mt2 empty" v-if="!isLoading && !events.length">
+    <div class="mt2 empty" v-if="!loading.events && !filteredEvents.length">
       {{ $t('logs.empty_list') }}
     </div>
-    <div class="has-text-centered" v-if="isLoading">
+    <div class="has-text-centered" v-if="loading.events">
       <spinner />
     </div>
     <div class="log-list" v-else>
@@ -29,7 +34,7 @@
         class="event-line"
         :key="event.id"
         @click="selectLine(event)"
-        v-for="event in events"
+        v-for="event in filteredEvents"
       >
         <span class="date tag mr1">{{ event.date }} </span>
         <span
@@ -40,7 +45,7 @@
           {{ event.shortType }}
         </span>
         <span class="name tag mr1">{{ event.name }}</span>
-        <ul v-if="selectedEvents[event.id]">
+        <ul v-if="selectedEvents[event.id]" @click.stop>
           <li class="flexrow">
             <span class="key">user</span>
             <people-avatar
@@ -69,6 +74,13 @@
           </li>
         </ul>
       </div>
+      <div class="has-text-centered mt1" v-if="hasMoreEvents">
+        <button-simple
+          :is-loading="loading.moreEvents"
+          :text="$t('main.load_more')"
+          @click="loadMoreEvents()"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -83,8 +95,11 @@ import { timeMixin } from '@/components/mixins/time'
 import ButtonSimple from '@/components/widgets/ButtonSimple.vue'
 import DateField from '@/components/widgets/DateField.vue'
 import PeopleAvatar from '@/components/widgets/PeopleAvatar.vue'
+import PeopleField from '@/components/widgets/PeopleField.vue'
 import PeopleName from '@/components/widgets/PeopleName.vue'
 import Spinner from '@/components/widgets/Spinner.vue'
+
+const PAGE_SIZE = 1000
 
 export default {
   name: 'events',
@@ -95,6 +110,7 @@ export default {
     ButtonSimple,
     DateField,
     PeopleAvatar,
+    PeopleField,
     PeopleName,
     Spinner
   },
@@ -103,8 +119,13 @@ export default {
     return {
       currentDate: new Date(),
       events: [],
-      isLoading: true,
-      selectedEvents: {}
+      hasMoreEvents: false,
+      selectedEvents: {},
+      selectedPerson: null,
+      loading: {
+        events: false,
+        moreEvents: false
+      }
     }
   },
 
@@ -113,45 +134,83 @@ export default {
   },
 
   computed: {
-    ...mapGetters(['personMap', 'user']),
+    ...mapGetters(['people', 'personMap', 'user']),
 
     today() {
       return moment().toDate()
+    },
+
+    filteredEvents() {
+      let events = this.events
+      if (this.selectedPerson) {
+        events = events.filter(
+          event => event.user_id === this.selectedPerson.id
+        )
+      }
+      return events
     }
   },
 
   methods: {
     ...mapActions(['loadEvents']),
 
-    loadDayEvents() {
+    async loadDayEvents() {
       const before = moment(this.currentDate).add(1, 'days')
       const after = moment(this.currentDate)
       this.selectedEvents = {}
-      this.isLoading = true
-      this.loadEvents({
-        after: formatFullDateWithRevertedTimezone(after, this.timezone),
-        before: formatFullDateWithRevertedTimezone(before, this.timezone)
+      this.events = []
+      this.loading.events = true
+      try {
+        const events = await this.loadEvents({
+          after: formatFullDateWithRevertedTimezone(after, this.timezone),
+          before: formatFullDateWithRevertedTimezone(before, this.timezone),
+          limit: PAGE_SIZE
+        })
+        this.events = this.formatEvents(events)
+        this.hasMoreEvents = events.length >= PAGE_SIZE
+      } catch (err) {
+        console.error(err)
+      } finally {
+        this.loading.events = false
+      }
+    },
+
+    async loadMoreEvents() {
+      if (!this.events.length) return
+
+      this.loading.moreEvents = true
+      const lastEventId = this.events[this.events.length - 1].id
+      const before = moment(this.currentDate).add(1, 'days')
+      const after = moment(this.currentDate)
+      try {
+        const events = await this.loadEvents({
+          after: formatFullDateWithRevertedTimezone(after, this.timezone),
+          before: formatFullDateWithRevertedTimezone(before, this.timezone),
+          lastEventId,
+          limit: PAGE_SIZE
+        })
+        this.events = [...this.events, ...this.formatEvents(events)]
+        this.hasMoreEvents = events.length >= PAGE_SIZE
+      } catch (err) {
+        console.error(err)
+      } finally {
+        this.loading.moreEvents = false
+      }
+    },
+
+    formatEvents(events) {
+      return events.map(event => {
+        const [name, type] = event.name.split(':')
+        return {
+          id: event.id,
+          date: this.formatDate(event.created_at),
+          data: event.data,
+          name,
+          shortType: type.substring(0, 3),
+          type,
+          user_id: event.user_id
+        }
       })
-        .then(events => {
-          this.events = events.map(event => {
-            const [name, type] = event.name.split(':')
-            return {
-              id: event.id,
-              date: this.formatDate(event.created_at),
-              data: event.data,
-              name,
-              shortType: type.substring(0, 3),
-              type,
-              user_id: event.user_id
-            }
-          })
-        })
-        .catch(err => {
-          console.error(err)
-        })
-        .finally(() => {
-          this.isLoading = false
-        })
     },
 
     selectLine(event) {
@@ -208,13 +267,19 @@ export default {
 
 .log-list {
   display: flex;
-  gap: 0.5em;
   flex-direction: column;
   margin-bottom: 2em;
 }
 
 .event-line {
   cursor: pointer;
+  padding: 0.25em;
+  border-radius: 4px;
+  transition: background 0.2s ease;
+
+  &:hover {
+    background: var(--background-selectable);
+  }
 
   .tag {
     border-radius: 4px;
@@ -271,6 +336,14 @@ export default {
       font-weight: 500;
       width: 170px;
       display: inline-block;
+    }
+
+    a {
+      color: var(--text);
+
+      &:hover {
+        text-decoration: underline;
+      }
     }
   }
 }

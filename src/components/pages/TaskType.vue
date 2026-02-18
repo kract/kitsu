@@ -741,6 +741,10 @@ export default {
       'user'
     ]),
 
+    isEpisodesSection() {
+      return this.$route.meta.section === 'episodes'
+    },
+
     taskStatusList() {
       return [
         {
@@ -1154,7 +1158,7 @@ export default {
           descFilters.length > 0 ||
           taskFilters.length > 0
         ) {
-          let tasks = []
+          let tasks
           const filters = taskFilters.concat(descFilters)
           if (keywords.length > 0) {
             tasks = indexSearch(this.$options.taskIndex, keywords)
@@ -1323,6 +1327,7 @@ export default {
           entity.canceled ||
           !entity.tasks?.length ||
           (this.isTVShow &&
+            !this.isEpisodesSection &&
             !['all', entity.episode_id || 'main'].includes(
               this.currentEpisode?.id
             ))

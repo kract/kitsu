@@ -34,7 +34,6 @@ import {
   CLEAR_SELECTED_TASKS,
   SET_TIME_SPENT,
   PEOPLE_TIMESHEET_LOADED,
-  PERSON_SET_DAY_OFF,
   PERSON_LOAD_TIME_SPENTS_END,
   SET_ORGANISATION,
   SET_PERSON_TASKS_SCROLL_POSITION,
@@ -179,13 +178,6 @@ const getters = {
   displayedPeople: state => state.displayedPeople,
   peopleIndex: state => cache.peopleIndex,
   personMap: state => cache.personMap,
-  personEmailMap: state => {
-    const emailMap = new Map()
-    cache.people.forEach(person => {
-      emailMap.set(person.email, person)
-    })
-    return emailMap
-  },
   isPeopleLoading: state => state.isPeopleLoading,
   isPeopleLoadingError: state => state.isPeopleLoadingError,
   peopleSearchQueries: state => state.peopleSearchQueries,
@@ -216,8 +208,6 @@ const getters = {
   timesheet: state => state.timesheet,
   personTimeSpentMap: state => state.personTimeSpentMap,
   personTimeSpentTotal: state => state.personTimeSpentTotal,
-  personDayOff: state => state.personDayOff,
-  personIsDayOff: state => Boolean(state.personDayOff?.id),
   dayOffMap: state => state.dayOffMap,
   daysOff: state => state.daysOff
 }
@@ -366,13 +356,11 @@ const actions = {
     })
     commit(LOAD_PERSON_DONE_TASKS_END, [])
 
-    const [tasks, timeSpents, dayOff] = await Promise.all([
+    const [tasks, timeSpents] = await Promise.all([
       peopleApi.getPersonTasks(personId).catch(() => []),
-      peopleApi.getTimeSpents(personId, date),
-      peopleApi.getDayOff(personId, date)
+      peopleApi.getTimeSpents(personId, date)
     ])
     commit(PERSON_LOAD_TIME_SPENTS_END, timeSpents || [])
-    commit(PERSON_SET_DAY_OFF, dayOff || {})
     commit(LOAD_PERSON_TASKS_END, {
       personId,
       tasks,
@@ -478,30 +466,14 @@ const actions = {
     commit(SET_TIME_SPENT, timeSpent)
   },
 
-  async setDayOff({ commit }, { id, personId, date, end_date, description }) {
-    let dayOff
-    if (id) {
-      dayOff = await peopleApi.updateDayOff(
-        id,
-        personId,
-        date,
-        end_date,
-        description
-      )
-    } else {
-      dayOff = await peopleApi.createDayOff(
-        personId,
-        date,
-        end_date,
-        description
-      )
-    }
-    commit(PERSON_SET_DAY_OFF, dayOff)
+  setDayOff(_, { id, personId, date, end_date, description }) {
+    return id
+      ? peopleApi.updateDayOff(id, personId, date, end_date, description)
+      : peopleApi.createDayOff(personId, date, end_date, description)
   },
 
-  async unsetDayOff({ commit }, dayOff = null) {
-    await peopleApi.deleteDayOff(dayOff || state.personDayOff)
-    commit(PERSON_SET_DAY_OFF, {})
+  async unsetDayOff(_, dayOff) {
+    await peopleApi.deleteDayOff(dayOff)
   },
 
   setPersonTasksScrollPosition({ commit }, scrollPosition) {
@@ -689,6 +661,7 @@ const mutations = {
     const person = cache.personMap.get(personId)
     person.totp_enabled = false
     person.email_otp_enabled = false
+    person.fido_enabled = false
     person.preferred_two_factor_authentication = null
   },
 
@@ -857,10 +830,6 @@ const mutations = {
         (acc, timeSpent) => timeSpent.duration + acc,
         0
       ) / 60
-  },
-
-  [PERSON_SET_DAY_OFF](state, dayOff) {
-    state.personDayOff = dayOff
   },
 
   [PEOPLE_SET_DAYS_OFF](state, daysOff) {

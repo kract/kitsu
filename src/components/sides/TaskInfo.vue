@@ -83,9 +83,12 @@
               v-if="currentTaskType"
             />
             <div class="title flexrow-item filler">
-              <router-link :to="taskEntityPath">
+              <router-link :to="taskEntityPath" v-if="!isCurrentUserClient">
                 {{ title }}
               </router-link>
+              <template v-else>
+                {{ title }}
+              </template>
             </div>
           </div>
         </div>
@@ -801,8 +804,7 @@ export default {
     },
 
     moviePath() {
-      let previewId = null
-      previewId = this.currentPreview.id
+      const previewId = this.currentPreview.id
       return `/api/movies/originals/preview-files/${previewId}.mp4`
     },
 
@@ -1238,7 +1240,7 @@ export default {
       this.$refs['preview-player'].displayFirst()
       this.deleteTaskPreview({
         taskId: this.task.id,
-        commentId: comment.id,
+        commentId: comment?.id,
         previewId
       })
         .then(() => {

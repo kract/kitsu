@@ -4,7 +4,7 @@
  */
 import { fabric } from 'fabric'
 import moment from 'moment'
-import { PSStroke, PSBrush } from '@arch-inc/fabricjs-psbrush'
+import { PSStroke, PSBrush } from 'fabricjs-psbrush'
 import { v4 as uuidv4 } from 'uuid'
 import { markRaw } from 'vue'
 
@@ -676,9 +676,8 @@ export const annotationMixin = {
         canvas.add(text)
         this.$options.silentAnnnotation = false
       } else if (obj.type === 'PSStroke') {
-        let strokeMultiplier = 1
         if (obj.canvasWidth) {
-          strokeMultiplier = canvasWidth / canvas.width
+          let strokeMultiplier = canvasWidth / canvas.width
           if (canvas.width < 420) strokeMultiplier /= 2
           psstroke = await this.deserializePSBrush(obj)
           psstroke.set('id', obj.id)
@@ -902,9 +901,7 @@ export const annotationMixin = {
      */
     onObjectAdded(obj) {
       if (this.$options.silentAnnnotation) return
-      let o = obj
-      if (obj.target) o = obj.target
-      else o = obj.targets[0]
+      let o = obj.target ? obj.target : obj.targets[0]
       o = this.setObjectData(o)
       // if (this.fabricCanvas.width < 420) o.strokeWidth *= 2
       if (this.isLaserModeOn) {
@@ -1055,7 +1052,7 @@ export const annotationMixin = {
       return this.resetCanvasSize().then(() => {
         if (this.fabricCanvas) this.fabricCanvas.renderAll()
         this.resetCanvasVisibility()
-        return Promise.resolve(this.fabricCanvas)
+        return this.fabricCanvas
       })
     },
 
@@ -1220,7 +1217,7 @@ export const annotationMixin = {
         this.fabricCanvas.freeDrawingBrush &&
         this.mouseIsDrawing
       ) {
-        let pressure = 0.5
+        let pressure
         if (this.mouseDrawingPressureMode === 'fade') {
           // The longer the time, the lower the pressure.
           const delta_time = Date.now() - this.mouseDrawingStartTime
