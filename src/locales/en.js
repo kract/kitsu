@@ -25,6 +25,7 @@ export default {
     number: 'asset | assets',
     restore_text: 'Are you sure you want to restore {name} from your archive?',
     restore_error: 'An error occurred while restoring this asset.',
+    show_linked: 'Display Breakdown Assets',
     tasks: 'Asset tasks',
     title: 'Assets',
     fields: {
@@ -41,6 +42,7 @@ export default {
   },
 
   asset_types: {
+    add_asset_type_placeholder: '+ Add Asset Type',
     add_asset_type_to_library: 'Add an asset type to the library',
     all_asset_types: 'All asset types',
     create_error: 'An error occurred while saving this asset type. Are you sure there is no asset type with a similar name?',
@@ -261,7 +263,9 @@ export default {
       task_status: 'Task status',
       person: 'Person\'s name',
       checklist: 'Checklist',
-      acknowledgements: 'Acknowledgements'
+      acknowledgements: 'Acknowledgements',
+      revision: 'Revision',
+      attachments: 'Attachments'
     }
   },
 
@@ -317,6 +321,7 @@ export default {
   },
 
   status_automations: {
+    add_status_automation_placeholder: '+ Add Status Automation',
     change_ready_for: 'changes "ready for" to',
     change_status: 'changes task status to',
     create_error: 'An error occurred while saving this status automation. Are you sure that there is no other automation with the same name?',
@@ -339,7 +344,7 @@ export default {
       out_field_type: 'Trigger',
       out_task_type: 'Applied Task Type',
       out_task_status: 'Applied Task Status',
-      import_last_revision: "Import Last Revision",
+      import_last_revision: 'Import Last Revision'
     },
     entity_types: {
       asset: 'Asset',
@@ -696,6 +701,7 @@ export default {
     delete_text: 'Are you sure you want to remove {name} from your database?',
     department: 'Department',
     description: 'Description',
+    developer_documentation: 'Developer documentation',
     documentation: 'Documentation',
     drop_files_here: 'Drop files here',
     edit: 'Edit',
@@ -707,6 +713,7 @@ export default {
     estimation: 'Estimation',
     estimation_short: 'Est.',
     expand_all: 'Expand all',
+    feedback: 'Roadmap / Feedback',
     files_selected: 'files selected',
     filter_group: 'Filter Group',
     filter_group_add: 'Add A Filter Group',
@@ -963,6 +970,7 @@ export default {
     team: 'Team',
     title: 'People',
     unactive: 'Inactive',
+    email_domain_error: 'This email domain is not allowed.',
     email_exist_error: 'This email is already in use by another user.',
     user_limit_error: 'You have reached your user limit. Please contact our team to upgrade your plan.',
     change_password_for: 'Change password for',
@@ -1350,6 +1358,7 @@ export default {
     },
     two_factor_authentication: {
       title: 'Two-factor authentication',
+      description: 'Two-factor authentication (<abbr title="Two-Factor Authentication">2FA</abbr>) adds an extra layer of security to your account. When enabled, you will need to provide a second form of verification in addition to your password each time you log in. You can use an authenticator app (<abbr title="Time-based One-Time Password">TOTP</abbr>), email verification (<abbr title="One-Time Password">OTP</abbr>), or a hardware security key (<abbr title="Fast IDentity Online">FIDO</abbr>) as your second factor.',
       mandatory: 'Your organization requires two-factor authentication. Please enable at least one method to continue.',
       enabled: 'Two-factor authentication enabled',
       scan_qrcode: 'Please scan this QR code in your TOTP application.',
@@ -1426,6 +1435,7 @@ export default {
   },
 
   task_status: {
+    add_task_status_placeholder: '+ Add Task Status',
     add_task_status_to_library: 'Add a task status to the library',
     create_error: 'An error occurred while saving this task status. Are you sure there is no task status with a similar name?',
     delete_text: 'Are you sure you want to remove {name} from your database?',
@@ -1720,6 +1730,7 @@ export default {
     assignation_disclaimer: 'If people are missing from the list, it means they are not listed in the team.',
     assign_explaination: 'Select a person to assign...',
     assignation_warning: 'Warning: you won\'t see the result because you are hiding assignments',
+    assignation_error: 'There was a problem assigning this person to the selected tasks. Not all tasks were assigned.',
     back_to_list: 'back to list',
     bigger: 'Widen task panel',
     big_thumbnails: 'Show big thumbnails',
@@ -1993,7 +2004,7 @@ export default {
     change_avatar: 'Change avatar',
     change_password: 'Change password',
     delete: 'Delete',
-    edit: "Edit",
+    edit: 'Edit',
     history: 'History',
     refresh: 'Refresh',
     restore: 'Restore'

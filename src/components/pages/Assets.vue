@@ -31,6 +31,7 @@
               <combobox-display-options
                 class="flexrow-item"
                 :type="type"
+                :has-linked-assets="isTVShow"
                 v-model="displaySettings"
               />
             </div>
@@ -80,11 +81,7 @@
         />
         <asset-list
           ref="asset-list"
-          :displayed-assets="
-            displaySettings.showSharedAssets
-              ? displayedAssetsByType
-              : displayedAssetsByTypeWithoutShared
-          "
+          :displayed-assets="displayedAssetsByTypeFiltered"
           :display-settings="displaySettings"
           :is-loading="isAssetsLoading || initialLoading"
           :is-error="isAssetsLoadingError"
@@ -332,7 +329,8 @@ export default {
         contactSheetMode: false,
         showAssignations: true,
         showInfos: true,
-        showSharedAssets: true
+        showSharedAssets: true,
+        showLinkedAssets: true
       },
       optionalColumns: ['Description', 'Ready for', 'Resolution'],
       pageName: 'Assets',
@@ -478,10 +476,31 @@ export default {
       return this.$refs['asset-search-field']
     },
 
-    displayedAssetsByTypeWithoutShared() {
-      return this.displayedAssetsByType.map(type =>
-        type.filter(asset => !asset.shared)
-      )
+    // Filter the displayed assets by the display settings
+    displayedAssetsByTypeFiltered() {
+      if (
+        this.displaySettings.showSharedAssets &&
+        this.displaySettings.showLinkedAssets
+      ) {
+        return this.displayedAssetsByType
+      }
+      const episodeId = this.currentEpisode?.id
+
+      return this.displayedAssetsByType.map(typeList => {
+        return typeList.filter(asset => {
+          if (!this.displaySettings.showSharedAssets && asset.shared) {
+            return false
+          }
+          if (
+            this.isTVShow &&
+            !this.displaySettings.showLinkedAssets &&
+            !['all', asset.episode_id || 'main'].includes(episodeId)
+          ) {
+            return false
+          }
+          return true
+        })
+      })
     },
 
     filteredAssets() {
@@ -606,6 +625,7 @@ export default {
     confirmNewAssetStay(form) {
       this.loading.stay = true
       this.success.edit = false
+      this.errors.edit = false
       this.newAsset(form)
         .then(() => {
           this.loading.stay = false
@@ -626,6 +646,7 @@ export default {
     confirmEditAsset(form) {
       let action = 'newAsset'
       this.loading.edit = true
+      this.success.edit = false
       this.errors.edit = false
       if (this.assetToEdit && this.assetToEdit.id) {
         action = 'editAsset'
@@ -636,6 +657,7 @@ export default {
           this.loading.edit = false
           this.modals.isNewDisplayed = false
           this.applySearchFromUrl(false)
+          this.success.edit = true
         })
         .catch(err => {
           console.error(err)
