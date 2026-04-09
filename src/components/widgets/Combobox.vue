@@ -9,16 +9,20 @@
           class="combobox select-input"
           :class="{
             thin,
-            error
+            error,
+            touched
           }"
           :style="{
             width: width ? `${width}px` : undefined
           }"
           ref="select"
           :disabled="disabled"
+          :required="required && !hasSelectedOption"
           @keyup.enter="emitEnter()"
           @change="updateValue"
+          @blur="touched = true"
         >
+          <option v-if="!hasSelectedOption" value="" disabled selected></option>
           <template
             v-for="(option, index) in options"
             :key="`${index}-${option.label}-${option.value}`"
@@ -85,10 +89,32 @@ export default {
     isInline: {
       default: false,
       type: Boolean
+    },
+    required: {
+      default: false,
+      type: Boolean
     }
   },
 
+  expose: ['isValid', 'focus'],
+
   emits: ['enter', 'update:modelValue'],
+
+  data() {
+    return {
+      touched: false
+    }
+  },
+
+  computed: {
+    hasSelectedOption() {
+      return this.options.some(option => option.value === this.modelValue)
+    },
+
+    isValid() {
+      return !this.required || this.hasSelectedOption
+    }
+  },
 
   methods: {
     updateValue() {
@@ -119,6 +145,7 @@ export default {
     },
 
     focus() {
+      this.touched = true
       this.$refs.select?.focus()
     }
   }
@@ -149,6 +176,10 @@ export default {
 
   &.thin {
     height: 2.1em;
+  }
+
+  &.touched:invalid {
+    border-color: $red;
   }
 }
 

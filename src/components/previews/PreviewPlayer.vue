@@ -893,7 +893,7 @@ export default {
     },
 
     currentProduction() {
-      return this.productionMap.get(this.task.project_id)
+      return this.productionMap.get(this.task?.project_id)
     },
 
     marginBottom() {
@@ -1164,7 +1164,7 @@ export default {
     },
 
     focus() {
-      this.$refs.container.focus()
+      this.$refs.container?.focus()
     },
 
     timeCodeClicked({ versionRevision, frame }) {

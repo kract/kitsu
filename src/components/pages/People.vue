@@ -134,6 +134,7 @@
       @confirm="confirmEditPeople"
       @confirm-invite="confirmCreateAndInvite"
       @invite="confirmInvite"
+      @reset-error="resetError"
       v-if="modals.edit"
     />
 
@@ -262,17 +263,7 @@ export default {
       selectedStudio: '',
       success: {
         invite: false
-      },
-      tabs: [
-        {
-          name: 'active',
-          label: this.$t('main.active')
-        },
-        {
-          name: 'unactive',
-          label: this.$t('people.unactive')
-        }
-      ]
+      }
     }
   },
 
@@ -298,6 +289,19 @@ export default {
       'personCsvFormData',
       'studioMap'
     ]),
+
+    tabs() {
+      return [
+        {
+          name: 'active',
+          label: `${this.$t('main.active')} (${this.activePeople.length})`
+        },
+        {
+          name: 'unactive',
+          label: `${this.$t('people.unactive')} (${this.unactivePeople.length})`
+        }
+      ]
+    },
 
     currentPeople() {
       let people = this.displayedPeople.filter(person => !person.is_bot)
@@ -527,6 +531,12 @@ export default {
         })
     },
 
+    resetError(error) {
+      if (error === 'email') {
+        this.errors.invalidEmailDomain = false
+      }
+    },
+
     onSearchChange() {
       if (this.searchField) {
         const searchQuery = this.searchField?.getValue()
@@ -535,9 +545,6 @@ export default {
         }
         this.setSearchInUrl()
       }
-      // refresh tabs
-      this.tabs[0].label = `${this.$t('main.active')} (${this.activePeople.length})`
-      this.tabs[1].label = `${this.$t('people.unactive')} (${this.unactivePeople.length})`
     },
 
     onAvatarClicked(person) {
