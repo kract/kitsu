@@ -69,9 +69,11 @@
     <route-tabs class="mb0" :active-tab="activeTab" :tabs="tabs" />
 
     <people-list
-      :entries="activeTab === 'active' ? activePeople : unactivePeople"
-      :is-loading="isPeopleLoading"
-      :is-error="isPeopleLoadingError"
+      :entries="listEntries"
+      :is-guests="activeTab === 'guests'"
+      :is-loading="isListLoading"
+      :is-error="isListError"
+      :seats-remaining="activeTab === 'active' ? seatsRemaining : null"
       @avatar-clicked="onAvatarClicked"
       @delete-clicked="onDeleteClicked"
       @edit-clicked="onEditClicked"
@@ -275,22 +277,36 @@ export default {
     this.setSearchFromUrl()
     await this.loadPeople()
     this.onSearchChange()
+    this.ensureGuestsLoaded()
   },
 
   computed: {
     ...mapGetters([
+      'activePeopleWithoutBot',
       'displayedPeople',
+      'guests',
       'isCurrentUserAdmin',
-      'isPeopleLoading',
-      'isPeopleLoadingError',
+      'isGuestsLoaded',
+      'isGuestsLoading',
+      'isGuestsLoadingError',
       'isImportPeopleLoading',
       'isImportPeopleLoadingError',
+      'isPeopleLoading',
+      'isPeopleLoadingError',
+      'mainConfig',
       'peopleSearchQueries',
       'personCsvFormData',
-      'studioMap'
+      'studioMap',
+      'userLimit'
     ]),
 
+    seatsRemaining() {
+      if (this.mainConfig.is_self_hosted) return null
+      return Math.max(0, this.userLimit - this.activePeopleWithoutBot.length)
+    },
+
     tabs() {
+      const guestCount = this.isGuestsLoaded ? this.currentGuests.length : null
       return [
         {
           name: 'active',
@@ -299,6 +315,13 @@ export default {
         {
           name: 'unactive',
           label: `${this.$t('people.unactive')} (${this.unactivePeople.length})`
+        },
+        {
+          name: 'guests',
+          label:
+            guestCount === null
+              ? this.$t('people.guests')
+              : `${this.$t('people.guests')} (${guestCount})`
         }
       ]
     },
@@ -348,6 +371,56 @@ export default {
 
     unactivePeople() {
       return this.currentPeople.filter(person => !person.active)
+    },
+
+    currentGuests() {
+      // Apply the same role / department / studio / search-text filters as
+      // the regular people list so the guests tab honours the toolbar
+      // controls. Guests typically have role=client; we still respect the
+      // toolbar value if the user picks something else.
+      const search = this.searchField?.getValue() || ''
+      const keyword = search.toLowerCase().trim()
+      let people = this.guests
+      if (keyword) {
+        people = people.filter(person =>
+          (person.name || '').toLowerCase().includes(keyword)
+        )
+      }
+      if (this.role !== 'all') {
+        people = people.filter(person => person.role === this.role)
+      }
+      if (this.selectedDepartment) {
+        people = people.filter(person =>
+          person.departments?.includes(this.selectedDepartment)
+        )
+      }
+      if (this.selectedStudio) {
+        people = people.filter(
+          person => person.studio_id === this.selectedStudio
+        )
+      }
+      return people.map(person => ({
+        ...person,
+        studio: this.studioMap.get(person.studio_id)
+      }))
+    },
+
+    listEntries() {
+      if (this.activeTab === 'guests') return this.currentGuests
+      if (this.activeTab === 'unactive') return this.unactivePeople
+      return this.activePeople
+    },
+
+    isListLoading() {
+      return this.activeTab === 'guests'
+        ? this.isGuestsLoading
+        : this.isPeopleLoading
+    },
+
+    isListError() {
+      return this.activeTab === 'guests'
+        ? this.isGuestsLoadingError
+        : this.isPeopleLoadingError
     }
   },
 
@@ -357,6 +430,7 @@ export default {
       'deletePeople',
       'editPerson',
       'invitePerson',
+      'loadGuests',
       'loadPeople',
       'newPerson',
       'newPersonAndInvite',
@@ -366,6 +440,11 @@ export default {
       'uploadPersonAvatar',
       'uploadPersonFile'
     ]),
+
+    ensureGuestsLoaded() {
+      if (this.activeTab !== 'guests') return
+      this.loadGuests().catch(console.error)
+    },
 
     renderImport(data, mode) {
       this.loading.importing = true
@@ -646,6 +725,7 @@ export default {
 
     '$route.query.tab'() {
       this.activeTab = this.$route.query.tab || 'active'
+      this.ensureGuestsLoaded()
     },
 
     '$route.query.search'(search) {

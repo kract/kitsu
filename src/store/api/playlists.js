@@ -100,5 +100,40 @@ export default {
       `/api/data/playlists/${playlist.id}/notify-clients`,
       data
     )
+  },
+
+  getShareLinks(playlistId) {
+    return client.pget(`/api/data/playlists/${playlistId}/share`)
+  },
+
+  createShareLink(playlistId, data) {
+    return client.ppost(`/api/data/playlists/${playlistId}/share`, data)
+  },
+
+  revokeShareLink(playlistId, token) {
+    return client.pdel(`/api/data/playlists/${playlistId}/share/${token}`)
+  },
+
+  sendShareInvitations(playlistId, token, data) {
+    return client.ppost(
+      `/api/data/playlists/${playlistId}/share/${token}/invite`,
+      data
+    )
+  },
+
+  postSharedPlaylistGuest(shareToken, data) {
+    return client.ppost(`/api/shared/playlists/${shareToken}/guest`, data)
+  },
+
+  loadSharedPlaylist(shareToken) {
+    return client.pget(`/api/shared/playlists/${shareToken}`)
+  },
+
+  loadSharedPlaylistContext(shareToken) {
+    return client.pget(`/api/shared/playlists/${shareToken}/context`)
+  },
+
+  saveSharedPlaylistAnnotations(shareToken, data) {
+    return client.pput(`/api/shared/playlists/${shareToken}/annotations`, data)
   }
 }

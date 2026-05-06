@@ -189,7 +189,7 @@
                 }"
                 namespace="sequences"
                 v-model="metadataDisplayHeaders"
-                v-show="columnSelectorDisplayed"
+                v-model:is-open="columnSelectorDisplayed"
                 v-if="displaySettings.showInfos"
               />
 
@@ -673,10 +673,7 @@ export default {
     ...mapActions(['setSequenceSelection']),
 
     isSelected(lineIndex, columnIndex) {
-      return (
-        this.sequenceSelectionGrid[lineIndex] &&
-        this.sequenceSelectionGrid[lineIndex][columnIndex]
-      )
+      return this.sequenceSelectionGrid.has(`${lineIndex}-${columnIndex}`)
     },
 
     sequencePath(sequenceId) {
@@ -752,7 +749,7 @@ th.actions {
   color: inherit;
 }
 
-.name.sequence-name {
+thead .name.sequence-name {
   min-width: 110px;
   width: 110px;
 }
@@ -851,7 +848,6 @@ input[type='number'] {
 
 td.metadata-descriptor {
   height: 3.1rem;
-  max-width: 120px;
   padding: 0;
 }
 

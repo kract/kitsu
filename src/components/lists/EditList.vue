@@ -189,7 +189,7 @@
                 }"
                 namespace="edits"
                 v-model="metadataDisplayHeaders"
-                v-show="columnSelectorDisplayed"
+                v-model:is-open="columnSelectorDisplayed"
                 v-if="displaySettings.showInfos"
               />
 
@@ -698,7 +698,7 @@ export default {
     ...mapActions(['displayMoreEdits', 'setEditSelection']),
 
     isSelected(lineIndex, columnIndex) {
-      return this.editSelectionGrid[lineIndex][columnIndex]
+      return this.editSelectionGrid.has(`${lineIndex}-${columnIndex}`)
     },
 
     toggleLine(edit, event) {
@@ -880,7 +880,7 @@ th.actions {
   color: inherit;
 }
 
-.name.edit-name {
+thead .name.edit-name {
   min-width: 110px;
   width: 110px;
 }
@@ -1001,7 +1001,6 @@ input[type='number'] {
 
 td.metadata-descriptor {
   height: 3.1rem;
-  max-width: 120px;
   padding: 0;
 }
 

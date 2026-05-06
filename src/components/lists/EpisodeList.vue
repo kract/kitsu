@@ -206,7 +206,7 @@
                 }"
                 namespace="episodes"
                 v-model="metadataDisplayHeaders"
-                v-show="columnSelectorDisplayed"
+                v-model:is-open="columnSelectorDisplayed"
                 v-if="displaySettings.showInfos"
               />
 
@@ -713,10 +713,7 @@ export default {
     ...mapActions(['setEpisodeSelection']),
 
     isSelected(lineIndex, columnIndex) {
-      return (
-        this.episodeSelectionGrid[lineIndex] &&
-        this.episodeSelectionGrid[lineIndex][columnIndex]
-      )
+      return this.episodeSelectionGrid.has(`${lineIndex}-${columnIndex}`)
     },
 
     episodePath(episodeId) {
@@ -808,7 +805,7 @@ th.actions {
   color: inherit;
 }
 
-.name.episode-name {
+thead .name.episode-name {
   min-width: 110px;
   width: 110px;
 }
@@ -907,7 +904,6 @@ input[type='number'] {
 
 td.metadata-descriptor {
   height: 3.1rem;
-  max-width: 120px;
   padding: 0;
 }
 

@@ -313,6 +313,7 @@
                     @pin-comment="onPinComment"
                     @edit-comment="onEditComment"
                     @delete-comment="onDeleteComment"
+                    @toggle-for-client="onToggleForClient"
                     @checklist-updated="saveComment"
                     @time-code-clicked="timeCodeClicked"
                     v-for="(comment, index) in taskComments"
@@ -898,7 +899,7 @@ export default {
       return sortPeople(
         this.currentProduction?.team
           .map(personId => this.personMap.get(personId))
-          .filter(Boolean) || []
+          .filter(Boolean) ?? []
       )
     },
 
@@ -993,7 +994,7 @@ export default {
     getTaskIdFromEntity(index) {
       const taskTypeId = this.task.task_type_id
       const entity = this.entityList[index]
-      if (!entity) return null
+      if (!entity?.tasks) return null
       return entity.tasks.find(ctaskId => {
         const task = this.taskMap.get(ctaskId)
         return task && task.task_type_id === taskTypeId
@@ -1080,7 +1081,8 @@ export default {
       checklist,
       taskStatusId,
       revision = undefined,
-      link = undefined
+      link = undefined,
+      forClient = false
     ) {
       const params = {
         taskId: this.task.id,
@@ -1089,7 +1091,8 @@ export default {
         checklist,
         comment,
         links: link ? [link] : null,
-        revision
+        revision,
+        forClient
       }
       const action =
         this.previewForms.length > 0 ? 'commentTaskWithPreview' : 'commentTask'
@@ -1447,6 +1450,10 @@ export default {
 
     onPinComment(comment) {
       this.pinComment(comment)
+    },
+
+    onToggleForClient(comment) {
+      this.$store.dispatch('toggleCommentForClient', comment)
     },
 
     onEditComment(comment) {

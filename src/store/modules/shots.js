@@ -21,11 +21,7 @@ import {
   sortTasks,
   sortValidationColumns
 } from '@/lib/sorting'
-import {
-  appendSelectionGrid,
-  buildSelectionGrid,
-  clearSelectionGrid
-} from '@/lib/selection'
+import { buildSelectionGrid, clearSelectionGrid } from '@/lib/selection'
 import {
   getFilledColumns,
   groupEntitiesByParents,
@@ -76,7 +72,8 @@ import {
   UNLOCK_SHOT,
   RESET_ALL,
   CLEAR_SELECTED_SHOTS,
-  SET_SHOT_SELECTION
+  SET_SHOT_SELECTION,
+  LOAD_TASK_END
 } from '@/store/mutation-types'
 
 const cache = {
@@ -246,15 +243,13 @@ const helpers = {
         ? state.displayedShots.length
         : PAGE_SIZE
     const displayedShots = result.slice(0, limit)
-    const maxX = displayedShots.length
-    const maxY = state.nbValidationColumns
 
     helpers.setListStats(state, result)
     Object.assign(state, {
       displayedShots: displayedShots,
       shotFilledColumns: getFilledColumns(displayedShots),
       shotSearchText: shotSearch,
-      shotSelectionGrid: buildSelectionGrid(maxX, maxY)
+      shotSelectionGrid: buildSelectionGrid()
     })
   }
 }
@@ -285,7 +280,7 @@ const initialState = {
   shotFilledColumns: {},
 
   shotCreated: '',
-  shotSelectionGrid: {},
+  shotSelectionGrid: new Set(),
 
   isShotsLoading: false,
   isShotsLoadingError: false,
@@ -959,9 +954,7 @@ const mutations = {
     state.displayedShots = displayedShots
     state.shotFilledColumns = filledColumns
 
-    const maxX = state.displayedShots.length
-    const maxY = state.nbValidationColumns
-    state.shotSelectionGrid = buildSelectionGrid(maxX, maxY)
+    state.shotSelectionGrid = buildSelectionGrid()
     helpers.setListStats(state, shots)
 
     state.shotSearchQueries = userFilters.shot?.[production.id] || []
@@ -1042,9 +1035,7 @@ const mutations = {
       cache.shots.push(newShot)
       cache.shots = sortShots(cache.shots)
       cache.shotMap.set(newShot.id, newShot)
-      const maxX = state.displayedShots.length
-      const maxY = state.nbValidationColumns
-      state.shotSelectionGrid = buildSelectionGrid(maxX, maxY)
+      state.shotSelectionGrid = buildSelectionGrid()
     }
     cache.shotIndex = buildShotIndex(cache.shots)
     state.shotCreated = newShot.name
@@ -1107,9 +1098,7 @@ const mutations = {
     cache.shotMap.set(shot.id, shot)
     cache.shotIndex = buildShotIndex(cache.shots)
 
-    const maxX = state.displayedShots.length
-    const maxY = state.nbValidationColumns
-    state.shotSelectionGrid = buildSelectionGrid(maxX, maxY)
+    state.shotSelectionGrid = buildSelectionGrid()
 
     if (shot.data.fps) state.isFps = true
     if (shot.nb_frames) state.isFrames = true
@@ -1150,17 +1139,6 @@ const mutations = {
         state.displayedShots.length + PAGE_SIZE
       )
       state.shotFilledColumns = getFilledColumns(state.displayedShots)
-      const previousX = Object.keys(state.shotSelectionGrid).length
-      const maxX = state.displayedShots.length
-      const maxY = state.nbValidationColumns
-      if (previousX >= 0) {
-        state.shotSelectionGrid = appendSelectionGrid(
-          state.shotSelectionGrid,
-          previousX,
-          maxX,
-          maxY
-        )
-      }
     }
   },
 
@@ -1185,7 +1163,7 @@ const mutations = {
 
   [REMOVE_SELECTED_TASK](state, validationInfo) {
     if (
-      !validationInfo.x &&
+      validationInfo.x === undefined &&
       validationInfo.task?.column &&
       cache.shotMap.get(validationInfo.task.entity.id)
     ) {
@@ -1195,31 +1173,20 @@ const mutations = {
       validationInfo.x = list.findIndex(e => e.id === entity.id)
       validationInfo.y = state.shotValidationColumns.indexOf(taskType.id)
     }
-    if (
-      state.shotSelectionGrid[0] &&
-      state.shotSelectionGrid[validationInfo.x]
-    ) {
-      state.shotSelectionGrid[validationInfo.x][validationInfo.y] = false
-    }
+    state.shotSelectionGrid.delete(`${validationInfo.x}-${validationInfo.y}`)
   },
 
   [ADD_SELECTED_TASK](state, validationInfo) {
-    if (
-      state.shotSelectionGrid[0] &&
-      state.shotSelectionGrid[validationInfo.x]
-    ) {
-      state.shotSelectionGrid[validationInfo.x][validationInfo.y] = true
-      state.selectedShots = new Map() // unselect all previously selected lines
-    }
+    state.shotSelectionGrid.add(`${validationInfo.x}-${validationInfo.y}`)
+    state.selectedShots = new Map() // unselect all previously selected lines
   },
 
-  [CLEAR_SELECTED_TASKS](state, validationInfo) {
+  [CLEAR_SELECTED_TASKS](state) {
     if (
       tasksStore.state.nbSelectedValidations > 0 ||
       tasksStore.state.nbSelectedTasks > 0
     ) {
-      const tmpGrid = JSON.parse(JSON.stringify(state.shotSelectionGrid))
-      state.shotSelectionGrid = clearSelectionGrid(tmpGrid)
+      clearSelectionGrid(state.shotSelectionGrid)
     }
   },
 
@@ -1260,23 +1227,28 @@ const mutations = {
     }
   },
 
+  [LOAD_TASK_END](state, task) {
+    const shot = cache.shotMap.get(task.entity_id)
+    if (shot) {
+      let timeSpent = 0
+      let estimation = 0
+      shot.tasks.forEach(taskId => {
+        const t = tasksStore.state.taskMap.get(taskId)
+        if (t) {
+          timeSpent += t.duration || 0
+          estimation += t.estimation || 0
+        }
+      })
+      shot.timeSpent = timeSpent
+      shot.estimation = estimation
+    }
+  },
+
   [ADD_SELECTED_TASKS](state, selection) {
-    let tmpGrid = JSON.parse(JSON.stringify(state.shotSelectionGrid))
     selection.forEach(validationInfo => {
-      if (!tmpGrid[validationInfo.x]) {
-        tmpGrid = appendSelectionGrid(
-          tmpGrid,
-          Object.keys(tmpGrid).length,
-          validationInfo.x + 1,
-          state.nbValidationColumns
-        )
-      }
-      if (tmpGrid[validationInfo.x]) {
-        tmpGrid[validationInfo.x][validationInfo.y] = true
-      }
+      state.shotSelectionGrid.add(`${validationInfo.x}-${validationInfo.y}`)
     })
-    state.selectedShots = new Map() // unselect all previously selected lines
-    state.shotSelectionGrid = tmpGrid
+    state.selectedShots = new Map()
   },
 
   [ADD_SHOT](
@@ -1355,9 +1327,7 @@ const mutations = {
       state.displayedShotsLength = cache.shots.filter(s => !s.canceled).length
       state.shotFilledColumns = getFilledColumns(state.displayedShots)
 
-      const maxX = state.displayedShots.length
-      const maxY = state.nbValidationColumns
-      state.shotSelectionGrid = buildSelectionGrid(maxX, maxY)
+      state.shotSelectionGrid = buildSelectionGrid()
     }
   },
 
@@ -1455,10 +1425,8 @@ const mutations = {
     }
     if (selected) {
       state.selectedShots.set(shot.id, shot)
-      const maxX = state.displayedShots.length
-      const maxY = state.nbValidationColumns
       // unselect previously selected tasks
-      state.shotSelectionGrid = buildSelectionGrid(maxX, maxY)
+      state.shotSelectionGrid = buildSelectionGrid()
     }
   },
 

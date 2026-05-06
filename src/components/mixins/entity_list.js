@@ -217,7 +217,7 @@ export const entityListMixin = {
           for (let i = startX; i <= endX; i++) {
             for (let j = startY; j <= endY; j++) {
               const validationCell = this.$refs[`validation-${i}-${j}`]?.[0]
-              const isSelectedCell = grid?.[i]?.[j]
+              const isSelectedCell = grid?.has(`${i}-${j}`)
               if (validationCell?.selectable && !isSelectedCell) {
                 let y = validationCell.columnY
                 if (!sticked) y += columnOffset
@@ -233,19 +233,16 @@ export const entityListMixin = {
             }
           }
           this.$store.commit('ADD_SELECTED_TASK', validationInfo)
-          this.updateTaskInQuery()
         }
       } else if (!validationInfo.isCtrlKey) {
         this.$store.commit('CLEAR_SELECTED_TASKS')
-        this.updateTaskInQuery()
       }
       if (selection.length === 0) {
         this.$store.commit('ADD_SELECTED_TASK', validationInfo)
-        this.updateTaskInQuery()
       } else {
         this.$store.commit('ADD_SELECTED_TASKS', selection)
-        this.updateTaskInQuery()
       }
+      this.updateTaskInQuery()
 
       if (!validationInfo.isShiftKey && validationInfo.isUserClick) {
         const x = validationInfo.x
@@ -349,15 +346,17 @@ export const entityListMixin = {
           throw new Error(`Invalid entity type: ${type}`)
       }
 
-      entities.forEach((entity, i) => {
-        selection.push({
-          entity,
-          column: this.taskTypeMap.get(taskTypeId),
-          task: this.taskMap.get(entity.validations.get(taskTypeId)),
-          x: i,
-          y: this.lastHeaderMenuDisplayedIndexInGrid
+      entities
+        .filter(entity => !entity.canceled)
+        .forEach((entity, i) => {
+          selection.push({
+            entity,
+            column: this.taskTypeMap.get(taskTypeId),
+            task: this.taskMap.get(entity.validations.get(taskTypeId)),
+            x: i,
+            y: this.lastHeaderMenuDisplayedIndexInGrid
+          })
         })
-      })
 
       this.$store.commit('CLEAR_SELECTED_TASKS')
       this.$nextTick(() => {
@@ -369,22 +368,24 @@ export const entityListMixin = {
 
     // i = line number in entity group and k is the index of the entity group
     getEntityLineNumber(entities, i, k) {
-      this.$options.lineIndex = {}
+      if (!this.$options.lineIndex || this.$options.lineIndexRef !== entities) {
+        this.$options.lineIndex = {}
+        this.$options.lineIndexRef = entities
+      }
       const key = `${i}-${k}`
       const cached = this.$options.lineIndex[key]
-      if (!cached) {
-        let j = 0
-        let index = 0
-        while (j < k) {
-          index += entities[j].length
-          j++
-        }
-        const val = i + index
-        this.$options.lineIndex[key] = val
-        return val
-      } else {
+      if (cached !== undefined) {
         return cached
       }
+      let j = 0
+      let index = 0
+      while (j < k) {
+        index += entities[j].length
+        j++
+      }
+      const val = i + index
+      this.$options.lineIndex[key] = val
+      return val
     },
 
     getGroupKey(group, i, fieldName) {

@@ -1,6 +1,5 @@
 import peopleApi from '@/store/api/people'
 import colors from '@/lib/colors'
-import { clearSelectionGrid } from '@/lib/selection'
 import { populateTask } from '@/lib/models'
 import { sortTasks, sortPeople, sortByName } from '@/lib/sorting'
 import { indexSearch, buildTaskIndex, buildPeopleIndex } from '@/lib/indexing'
@@ -14,6 +13,9 @@ import {
   LOAD_PEOPLE_START,
   LOAD_PEOPLE_ERROR,
   LOAD_PEOPLE_END,
+  LOAD_GUESTS_START,
+  LOAD_GUESTS_END,
+  LOAD_GUESTS_ERROR,
   PERSON_CSV_FILE_SELECTED,
   IMPORT_PEOPLE_START,
   IMPORT_PEOPLE_ERROR,
@@ -37,6 +39,7 @@ import {
   PERSON_LOAD_TIME_SPENTS_END,
   SET_ORGANISATION,
   SET_PERSON_TASKS_SCROLL_POSITION,
+  SET_USER_LIMIT,
   PEOPLE_SET_DAY_OFFS,
   PEOPLE_SET_DAYS_OFF,
   PEOPLE_SEARCH_CHANGE,
@@ -116,7 +119,8 @@ const cache = {
   personDoneTasksIndex: {},
   personDoneTasks: [],
   personTasksIndex: {},
-  personMap: new Map()
+  personMap: new Map(),
+  guests: []
 }
 
 const initialState = {
@@ -138,6 +142,15 @@ const initialState = {
   isPeopleLoading: false,
   isPeopleLoadingError: true,
 
+  // Guests are loaded lazily — only when the user opens the dedicated
+  // tab in the People page — because they can be large and pollute the
+  // active/unactive lists. The flag is reset on RESET_ALL so a re-login
+  // forces a fresh fetch.
+  guests: [],
+  isGuestsLoading: false,
+  isGuestsLoadingError: false,
+  isGuestsLoaded: false,
+
   isImportPeopleLoading: false,
   isImportPeopleLoadingError: false,
 
@@ -156,7 +169,7 @@ const initialState = {
   displayedPersonTasks: [],
   displayedPersonDoneTasks: [],
   personTasksSearchText: '',
-  personTaskSelectionGrid: {},
+  personTaskSelectionGrid: new Set(),
   personTaskSearchQueries: [],
   personTasksScrollPosition: 0,
 
@@ -165,7 +178,10 @@ const initialState = {
   personTimeSpentTotal: 0,
   personDayOff: {},
   daysOff: [],
-  dayOffMap: {}
+  dayOffMap: {},
+
+  userLimit: 0,
+  personMapVersion: 0
 }
 
 const state = {
@@ -182,11 +198,20 @@ const getters = {
     cache.people.filter(person => person.active && !person.is_bot),
   displayedPeople: state => state.displayedPeople,
   peopleIndex: state => cache.peopleIndex,
-  personMap: state => cache.personMap,
+  personMap: state => {
+    // Access personMapVersion to trigger reactivity when the map changes.
+    state.personMapVersion // eslint-disable-line no-unused-expressions
+    return cache.personMap
+  },
   isPeopleLoading: state => state.isPeopleLoading,
   isPeopleLoadingError: state => state.isPeopleLoadingError,
   peopleSearchQueries: state => state.peopleSearchQueries,
   peopleSearchText: state => state.peopleSearchText,
+
+  guests: state => state.guests,
+  isGuestsLoading: state => state.isGuestsLoading,
+  isGuestsLoadingError: state => state.isGuestsLoadingError,
+  isGuestsLoaded: state => state.isGuestsLoaded,
 
   isImportPeopleLoading: state => state.isImportPeopleLoading,
   isImportPeopleLoadingError: state => state.isImportPeopleLoadingError,
@@ -214,7 +239,9 @@ const getters = {
   personTimeSpentMap: state => state.personTimeSpentMap,
   personTimeSpentTotal: state => state.personTimeSpentTotal,
   dayOffMap: state => state.dayOffMap,
-  daysOff: state => state.daysOff
+  daysOff: state => state.daysOff,
+
+  userLimit: state => state.userLimit
 }
 
 const actions = {
@@ -255,6 +282,19 @@ const actions = {
     }
   },
 
+  async loadGuests({ commit, state }, { force = false } = {}) {
+    if (state.isGuestsLoading) return
+    if (state.isGuestsLoaded && !force) return
+    commit(LOAD_GUESTS_START)
+    try {
+      const guests = await peopleApi.getGuests()
+      commit(LOAD_GUESTS_END, { guests })
+    } catch (err) {
+      console.error(err)
+      commit(LOAD_GUESTS_ERROR)
+    }
+  },
+
   async loadPerson({ commit }, personId) {
     const person = await peopleApi.getPerson(personId)
     commit(EDIT_PEOPLE_END, person)
@@ -267,8 +307,8 @@ const actions = {
   },
 
   async newPersonAndInvite({ commit }, data) {
-    let person = await peopleApi.createPerson(data)
-    person = await peopleApi.invitePerson(person)
+    const person = await peopleApi.createPerson(data)
+    await peopleApi.invitePerson(person)
     commit(EDIT_PEOPLE_END, person)
     return person
   },
@@ -614,10 +654,35 @@ const mutations = {
     cache.people.forEach(person => {
       cache.personMap.set(person.id, person)
     })
+    state.personMapVersion++
     state.displayedPeople = cache.people
     cache.peopleIndex = buildPeopleIndex(cache.people)
 
     state.peopleSearchQueries = userFilters.people?.all || []
+  },
+
+  [LOAD_GUESTS_START](state) {
+    state.isGuestsLoading = true
+    state.isGuestsLoadingError = false
+  },
+
+  [LOAD_GUESTS_ERROR](state) {
+    state.isGuestsLoading = false
+    state.isGuestsLoadingError = true
+  },
+
+  [LOAD_GUESTS_END](state, { guests }) {
+    state.isGuestsLoading = false
+    state.isGuestsLoadingError = false
+    cache.guests = sortPeople(guests).map(person =>
+      helpers.addAdditionalInformation(person)
+    )
+    cache.guests.forEach(person => {
+      cache.personMap.set(person.id, person)
+    })
+    state.personMapVersion++
+    state.guests = cache.guests
+    state.isGuestsLoaded = true
   },
 
   [DELETE_PEOPLE_END](state, person) {
@@ -630,6 +695,7 @@ const mutations = {
       }
       cache.personMap.delete(person.id)
     }
+    state.personMapVersion++
     cache.peopleIndex = buildPeopleIndex(cache.people)
     if (state.peopleSearchText) {
       const keywords = getKeyWords(state.peopleSearchText)
@@ -651,6 +717,7 @@ const mutations = {
         cache.people.push(person)
       }
       cache.personMap.set(person.id, person)
+      state.personMapVersion++
       cache.people = sortPeople(cache.people)
       cache.peopleIndex = buildPeopleIndex(cache.people)
       if (state.peopleSearchText) {
@@ -716,11 +783,7 @@ const mutations = {
       const taskStatus = helpers.getTaskStatus(task.task_status_id)
       task.taskStatus = taskStatus
     })
-    const personTaskSelectionGrid = {}
-    for (let i = 0; i < tasks.length; i++) {
-      personTaskSelectionGrid[i] = { 0: false }
-    }
-    state.personTaskSelectionGrid = personTaskSelectionGrid
+    state.personTaskSelectionGrid = new Set()
     state.personTasks = sortTasks(tasks, taskTypeMap)
 
     cache.personTasksIndex = buildTaskIndex(tasks)
@@ -786,25 +849,21 @@ const mutations = {
   },
 
   [REMOVE_SELECTED_TASK](state, validationInfo) {
-    if (state.personTaskSelectionGrid[validationInfo.x]) {
-      state.personTaskSelectionGrid[validationInfo.x][0] = false
-    }
+    state.personTaskSelectionGrid.delete(`${validationInfo.x}-0`)
   },
 
   [ADD_SELECTED_TASK](state, validationInfo) {
-    if (state.personTaskSelectionGrid[validationInfo.x]) {
-      state.personTaskSelectionGrid[validationInfo.x][0] = true
-    }
+    state.personTaskSelectionGrid.add(`${validationInfo.x}-0`)
   },
 
-  [CLEAR_SELECTED_TASKS](state, validationInfo) {
+  [CLEAR_SELECTED_TASKS](state) {
     if (
       taskStore.state.nbSelectedValidations > 0 ||
       taskStore.state.nbSelectedTasks > 0
     ) {
-      state.personTaskSelectionGrid = clearSelectionGrid(
-        state.personTaskSelectionGrid
-      )
+      for (const key of state.personTaskSelectionGrid) {
+        state.personTaskSelectionGrid.delete(key)
+      }
     }
   },
 
@@ -883,12 +942,17 @@ const mutations = {
     state.organisation = { ...state.organisation, ...organisation }
   },
 
+  [SET_USER_LIMIT](state, userLimit) {
+    state.userLimit = userLimit
+  },
+
   [RESET_ALL](state) {
     Object.assign(state, { ...initialState })
     cache.peopleIndex = {}
     cache.personTasksIndex = {}
     cache.personDoneTasksIndex = {}
     cache.personDoneTasks = []
+    cache.guests = []
   },
 
   [SAVE_PEOPLE_SEARCH_END](state, { searchQuery }) {

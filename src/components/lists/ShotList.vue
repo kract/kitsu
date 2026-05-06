@@ -267,7 +267,7 @@
                   max_retakes: !isMaxRetakes
                 }"
                 v-model="metadataDisplayHeaders"
-                v-show="columnSelectorDisplayed"
+                v-model:is-open="columnSelectorDisplayed"
                 v-if="displaySettings.showInfos"
               />
 
@@ -349,7 +349,10 @@
                 class="metadata-descriptor datatable-row-header"
                 :title="shot.data ? shot.data[descriptor.field_name] : ''"
                 :style="{
-                  'z-index': 1000 - i - k * 100, // Needed for combo to be above the next cell
+                  'z-index':
+                    descriptor.data_type === 'taglist'
+                      ? 1000 - (getIndex(i, k) % 1000) // Needed for combo to be above the next cell
+                      : undefined,
                   left: offsets['editor-' + j]
                     ? `${offsets['editor-' + j]}px`
                     : '0'
@@ -1039,7 +1042,7 @@ export default {
 
     isSelected(indexInGroup, groupIndex, columnIndex) {
       const lineIndex = this.getIndex(indexInGroup, groupIndex)
-      return this.shotSelectionGrid[lineIndex][columnIndex]
+      return this.shotSelectionGrid.has(`${lineIndex}-${columnIndex}`)
     },
 
     isCastingReady(shot, columnId) {
@@ -1261,9 +1264,9 @@ th.actions {
   color: inherit;
 }
 
-.name.shot-name {
+thead .name.shot-name {
   min-width: 110px;
-  width: 110px;
+  width: 300px;
 }
 
 .episode {
@@ -1378,7 +1381,6 @@ input[type='number'] {
 
 td.metadata-descriptor {
   height: 3.1rem;
-  max-width: 120px;
   padding: 0;
 }
 

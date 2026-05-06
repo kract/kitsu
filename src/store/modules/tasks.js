@@ -6,7 +6,7 @@ import {
   sortRevisionPreviewFiles,
   sortByName
 } from '@/lib/sorting'
-import { arrayMove, removeModelFromList } from '@/lib/models'
+import { arrayMove, populateTask, removeModelFromList } from '@/lib/models'
 import func from '@/lib/func'
 
 import assetStore from '@/store/modules/assets'
@@ -422,9 +422,16 @@ const actions = {
 
   commentTask(
     { commit },
-    { taskId, taskStatusId, comment, attachment, checklist }
+    { taskId, taskStatusId, comment, attachment, checklist, forClient }
   ) {
-    const data = { taskId, taskStatusId, comment, attachment, checklist }
+    const data = {
+      taskId,
+      taskStatusId,
+      comment,
+      attachment,
+      checklist,
+      forClient
+    }
     return tasksApi.commentTask(data).then(comment => {
       commit(NEW_TASK_COMMENT_END, { comment, taskId })
       return comment
@@ -441,10 +448,19 @@ const actions = {
       comment,
       form,
       revision,
-      links
+      links,
+      forClient
     }
   ) {
-    const data = { taskId, taskStatusId, comment, attachment, checklist, links }
+    const data = {
+      taskId,
+      taskStatusId,
+      comment,
+      attachment,
+      checklist,
+      links,
+      forClient
+    }
     const previewForms = [...state.previewForms]
     commit(ADD_PREVIEW_START)
     let newComment
@@ -769,6 +785,14 @@ const actions = {
   pinComment({ commit }, comment) {
     commit(PIN_COMMENT, comment)
     return tasksApi.pinComment(comment)
+  },
+
+  toggleCommentForClient({ commit }, comment) {
+    const next = !comment.for_client
+    return tasksApi.updateCommentForClient(comment.id, next).then(updated => {
+      commit(UPDATE_COMMENT_REPLIES, updated)
+      return updated
+    })
   },
 
   refreshComment({ commit }, { commentId }) {
@@ -1240,6 +1264,7 @@ const mutations = {
         const person = helpers.getPerson(task.last_comment.person_id)
         task.last_comment.person = person
       }
+      populateTask(task)
       state.taskMap.set(task.id, task)
     })
   },
@@ -1250,6 +1275,7 @@ const mutations = {
         const person = helpers.getPerson(task.last_comment.person_id)
         task.last_comment.person = person
       }
+      populateTask(task)
       state.taskMap.set(task.id, task)
     })
   },
@@ -1329,6 +1355,19 @@ const mutations = {
       )
       localComment.replies = comment.replies
     }
+  },
+
+  BLANK_COMMENT_CONTENT(state, { taskId, commentId }) {
+    if (!state.taskComments[taskId]) return
+    const localComment = state.taskComments[taskId].find(
+      c => c.id === commentId
+    )
+    if (!localComment) return
+    localComment.text = ''
+    localComment.attachment_files = []
+    localComment.checklist = []
+    localComment.replies = []
+    localComment.for_client = false
   },
 
   [ADD_ATTACHMENT_TO_COMMENT](state, { comment, attachmentFiles }) {
