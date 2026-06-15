@@ -39,6 +39,7 @@ import {
   DELETE_TASK_END,
   EDIT_COMMENT_END,
   DELETE_COMMENT_END,
+  MOVE_COMMENT_END,
   PIN_COMMENT,
   ACK_COMMENT,
   REMOVE_TASK_COMMENT,
@@ -119,6 +120,19 @@ const helpers = {
 
   getTaskStatus(taskStatusId) {
     return taskStatusStore.cache.taskStatusMap.get(taskStatusId)
+  },
+
+  // Fall back to the API-embedded author since guests aren't in personMap.
+  resolveAuthor(personId, embedded) {
+    const person = personStore.cache.personMap.get(personId) || embedded
+    return personStore.helpers.addAdditionalInformation(person)
+  },
+
+  enrichCommentAuthors(comment) {
+    comment.person = helpers.resolveAuthor(comment.person_id, comment.person)
+    comment.replies?.forEach(reply => {
+      reply.person = helpers.resolveAuthor(reply.person_id, reply.person)
+    })
   }
 }
 
@@ -422,6 +436,19 @@ const actions = {
     })
   },
 
+  moveCommentToTask({ commit }, { taskId, commentId, targetTaskId }) {
+    return tasksApi
+      .moveCommentToTask(taskId, commentId, targetTaskId)
+      .then(comment => {
+        commit(MOVE_COMMENT_END, {
+          sourceTaskId: taskId,
+          targetTaskId,
+          comment
+        })
+        return comment
+      })
+  },
+
   commentTask(
     { commit },
     { taskId, taskStatusId, comment, attachment, checklist, forClient }
@@ -616,6 +643,7 @@ const actions = {
   setLastTaskPreview({ commit, state }, taskId) {
     const taskMap = state.taskMap
     return tasksApi.setLastTaskPreviewAsEntityThumbnail(taskId).then(entity => {
+      if (!entity) return
       commit(SET_PREVIEW, {
         taskId,
         entityId: entity.id,
@@ -878,9 +906,7 @@ const mutations = {
   },
 
   [LOAD_TASK_COMMENTS_END](state, { taskId, comments }) {
-    comments.forEach(comment => {
-      comment.person = personStore.cache.personMap.get(comment.person_id)
-    })
+    comments.forEach(comment => helpers.enrichCommentAuthors(comment))
     state.taskComments[taskId] = sortComments([...comments])
     state.taskPreviews[taskId] = comments.reduce((previews, comment) => {
       if (comment.previews && comment.previews.length > 0) {
@@ -926,14 +952,7 @@ const mutations = {
       comment.task_status = helpers.getTaskStatus(comment.task_status_id)
     }
 
-    if (comment.person === undefined) {
-      const getPerson = personStore.getters.getPerson(personStore.state)
-      comment.person = getPerson(comment.person_id)
-    }
-
-    comment.person = personStore.helpers.addAdditionalInformation(
-      comment.person
-    )
+    helpers.enrichCommentAuthors(comment)
 
     if (!taskId) {
       taskId = comment.object_id
@@ -1019,6 +1038,28 @@ const mutations = {
       ),
       checklist: comment.checklist || []
     })
+  },
+
+  [MOVE_COMMENT_END](state, { sourceTaskId, targetTaskId, comment }) {
+    const sourceComments = state.taskComments[sourceTaskId]
+    if (sourceComments) {
+      state.taskComments[sourceTaskId] = sourceComments.filter(
+        c => c.id !== comment.id
+      )
+    }
+    if (state.taskComments[targetTaskId]) {
+      const enriched = {
+        ...comment,
+        person: personStore.cache.personMap.get(comment.person_id),
+        task_status: taskStatusStore.cache.taskStatusMap.get(
+          comment.task_status_id
+        )
+      }
+      state.taskComments[targetTaskId] = sortComments([
+        ...state.taskComments[targetTaskId].filter(c => c.id !== comment.id),
+        enriched
+      ])
+    }
   },
 
   [PREVIEW_FILE_SELECTED](state, forms) {
@@ -1331,6 +1372,7 @@ const mutations = {
   [ADD_REPLY_TO_COMMENT](state, { comment, reply }) {
     if (!comment.replies) comment.replies = []
     if (!comment.replies.find(r => r.id === reply.id)) {
+      reply.person = helpers.resolveAuthor(reply.person_id, reply.person)
       comment.replies.push(reply)
       comment.attachment_files = [
         ...(comment.attachment_files || []),

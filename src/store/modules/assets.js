@@ -405,19 +405,24 @@ const actions = {
       // first, then pick the first one.
       if (rootGetters.episodes.length === 0) {
         await dispatch('loadEpisodes')
+        // loadEpisodes may resolve currentEpisode from the route (e.g. "all").
+        episode = rootGetters.currentEpisode
       }
-      episode = rootGetters.episodes.length > 0 ? rootGetters.episodes[0] : null
       if (!episode) {
-        return []
+        episode =
+          rootGetters.episodes.length > 0 ? rootGetters.episodes[0] : null
+        if (!episode) {
+          return []
+        }
+        commit(SET_CURRENT_EPISODE, episode.id)
       }
-      commit(SET_CURRENT_EPISODE, episode.id)
     }
 
     if (state.isAssetsLoading) {
       return cache.assets
     }
 
-    if (all) {
+    if (all || episode?.id === 'all') {
       episode = null // Do not filter by episode
     }
 
@@ -693,8 +698,8 @@ const actions = {
     })
   },
 
-  setAssetTypeListScrollPosition({ commit }) {
-    commit(SET_PRODUCTION_ASSET_TYPE_LIST_SCROLL_POSITION)
+  setAssetTypeListScrollPosition({ commit }, scrollPosition) {
+    commit(SET_PRODUCTION_ASSET_TYPE_LIST_SCROLL_POSITION, scrollPosition)
   },
 
   computeAssetTypeStats({ commit, rootGetters }) {
@@ -792,8 +797,8 @@ const actions = {
     let taskIds = []
     if (selectionOnly) {
       taskIds = cache.result
-        .filter(a => a.validations.get(taskTypeId))
-        .map(a => a.validations.get(taskTypeId))
+        .filter(asset => asset.validations.get(taskTypeId))
+        .map(asset => asset.validations.get(taskTypeId))
     }
     return dispatch('deleteAllTasks', { projectId, taskTypeId, taskIds })
   },

@@ -22,6 +22,7 @@
     <corner-left-down-icon class="icon" v-else-if="icon === 'undo'" />
     <corner-right-down-icon class="icon" v-else-if="icon === 'redo'" />
     <save-icon class="icon" v-else-if="icon === 'save'" />
+    <shapes-icon class="icon" v-else-if="icon === 'shapes'" />
     <plus-icon class="icon" v-else-if="icon === 'plus'" />
     <minus-icon class="icon" v-else-if="icon === 'minus'" />
     <message-square-icon class="icon" v-else-if="icon === 'comment'" />
@@ -42,7 +43,7 @@
     <list-icon class="icon" v-else-if="icon === 'list'" />
     <triangle-icon class="icon" v-else-if="icon === 'triangle'" />
     <music-icon class="icon" v-else-if="icon === 'music'" />
-    <square-icon class="icon" v-else-if="icon === 'eraser'" />
+    <eraser-icon class="icon" v-else-if="icon === 'eraser'" />
     <key-icon class="icon" v-else-if="icon === 'key'" />
     <zoom-in-icon class="icon" v-else-if="icon === 'loupe'" />
     <globe-icon class="icon" v-else-if="icon === 'globe'" />
@@ -105,6 +106,7 @@ import {
   FileDigitIcon,
   EditIcon,
   Edit2Icon,
+  EraserIcon,
   GlobeIcon,
   GridIcon,
   FileDownIcon,
@@ -124,10 +126,10 @@ import {
   RotateCcwIcon,
   SaveIcon,
   SendIcon,
+  ShapesIcon,
   SkipBackIcon,
   SkipForwardIcon,
   SmileIcon,
-  SquareIcon,
   TriangleIcon,
   XIcon,
   ZoomInIcon

@@ -60,6 +60,12 @@
             v-model="form.locale"
             @update:model-value="localeChanged"
           />
+          <combobox
+            :label="$t('people.fields.country')"
+            :options="countryOptions"
+            v-model="form.country"
+            v-if="user.role !== 'client' && !user.is_guest"
+          />
         </div>
       </card>
 
@@ -156,13 +162,10 @@
           type="password"
           v-model="passwordForm.password2"
         />
+      </card>
 
-        <div class="two-factor">
-          <h3 class="card-subtitle">
-            {{ $t('profile.two_factor_authentication.title') }}
-          </h3>
-          <two-factor-authentication-setup />
-        </div>
+      <card :title="$t('profile.two_factor_authentication.title')">
+        <two-factor-authentication-setup />
       </card>
     </div>
 
@@ -186,7 +189,8 @@ import { useI18n } from 'vue-i18n'
 import { useHead } from '@unhead/vue'
 import { useStore } from 'vuex'
 
-import lang from '@/lib/lang'
+import { getCountryOptions } from '@/lib/countries'
+import lang, { localeCode } from '@/lib/lang'
 
 import ChangeAvatarModal from '@/components/modals/ChangeAvatarModal.vue'
 import Card from '@/components/widgets/Card.vue'
@@ -213,6 +217,7 @@ const form = ref({
   notifications_discord_userid: '',
   email: '',
   phone: '',
+  country: null,
   timezone: 'Europe/Paris',
   locale: 'en_US'
 })
@@ -264,6 +269,8 @@ const timezoneOptions = computed(() =>
     .filter(tz => tz.indexOf('/') > 0 && tz.indexOf('Etc') < 0)
     .map(tz => ({ label: tz, value: tz }))
 )
+
+const countryOptions = computed(() => getCountryOptions(localeCode.value))
 
 // Functions
 
@@ -435,13 +442,6 @@ useHead({ title: computed(() => `${t('profile.title')} - Kitsu`) })
   }
 }
 
-.card-subtitle {
-  color: var(--text);
-  font-size: 1rem;
-  font-weight: 600;
-  margin: 1.5rem 0 0.75rem;
-}
-
 .grid-two {
   display: grid;
   gap: 0 1rem;
@@ -456,12 +456,6 @@ useHead({ title: computed(() => `${t('profile.title')} - Kitsu`) })
   border-top: 1px solid var(--border);
   padding-top: 1rem;
   margin-top: 0.5rem;
-}
-
-.two-factor {
-  border-top: 1px solid var(--border);
-  margin-top: 1.5rem;
-  padding-top: 0.5rem;
 }
 
 @media screen and (max-width: 768px) {

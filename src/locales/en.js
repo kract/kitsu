@@ -251,6 +251,14 @@ export default {
     pin: 'Pin',
     pinned: 'Pinned',
     pinned_revision: 'Pinned revision',
+    player: {
+      play: 'Play',
+      pause: 'Pause',
+      mute: 'Mute',
+      unmute: 'Unmute',
+      fullscreen: 'Fullscreen',
+      download: 'Download'
+    },
     post_status: 'Post comment',
     previews: 'Preview files to publish as a new revision',
     retake: 'Retake',
@@ -262,6 +270,14 @@ export default {
     unpin: 'Unpin',
     validated: 'Validated!',
     validation_required: 'Validation Required',
+    move_to_task: 'Move to',
+    move_modal: {
+      title: 'Move comment to another task',
+      intro: 'Pick a task of the same entity to move this comment to. Notifications will be sent on the destination task as for a new comment.',
+      target_label: 'Destination task',
+      no_target: 'No other task is available on this entity.',
+      error: 'Could not move the comment. Please contact our support team.'
+    },
     fields: {
       text: 'Text',
       created_at: 'Creation date',
@@ -353,7 +369,10 @@ export default {
     },
     entity_types: {
       asset: 'Asset',
-      shot: 'Shot'
+      shot: 'Shot',
+      sequence: 'Sequence',
+      episode: 'Episode',
+      edit: 'Edit'
     },
     field_types: {
       status: 'Status',
@@ -593,6 +612,7 @@ export default {
     ctrlright: 'Move metadata cell selection right',
     ctrlup: 'Move metadata cell selection up',
     draw: 'Set draw mode on',
+    erase: 'Set eraser mode on',
     plhome: 'Go to the first frame',
     plend: 'Go to the last frame',
     plaltleft: 'Go to the last frame of the previous shot',
@@ -603,7 +623,25 @@ export default {
     undo: 'Undo',
     playlist_navigation: 'Playlist navigation',
     remove_annotation: 'Remove annotation',
-    shortcuts: 'Shortcuts'
+    shortcuts: 'Shortcuts',
+    player: 'Player',
+    play_pause: 'Play / pause',
+    play_pause_typing: 'Play / pause (even while typing a comment)',
+    previous_frame: 'Previous frame',
+    next_frame: 'Next frame',
+    previous_annotation: 'Previous annotation',
+    next_annotation: 'Next annotation',
+    copy_annotation: 'Copy selected annotation',
+    paste_annotation: 'Paste annotation',
+    pan_image: 'Pan the image',
+    straight_line: 'Draw a straight line',
+    constant_width: 'Draw at a constant width (no pressure)',
+    move_entity_left: 'Move selected entity to the left',
+    move_entity_right: 'Move selected entity to the right',
+    scrub_anywhere: 'Scrub the timeline from anywhere in the player',
+    focus_comment: 'Toggle focus between the player and the comment box',
+    first_frame: 'Go to the first frame',
+    last_frame: 'Go to the last frame'
   },
 
   intro: {
@@ -676,6 +714,8 @@ export default {
     },
     login_with_saml: 'SSO login with {saml_idp_name}',
     login_saml: 'SSO login',
+    login_with_oidc: 'SSO login with {oidc_idp_name}',
+    login_oidc: 'SSO login',
   },
 
   logs: {
@@ -719,6 +759,7 @@ export default {
     apply: 'Apply',
     archived: 'Archived',
     attach_snapshots: 'Attach snapshots from your annotation',
+    attach_snapshots_with_label: 'Attach snapshots with a label burned in',
     avatar: {
       open_page: 'Open {personName} page',
       unassign: 'Unassign {personName}'
@@ -763,6 +804,7 @@ export default {
     estimation: 'Estimation',
     estimation_short: 'Est.',
     expand_all: 'Expand all',
+    export: 'Export',
     feedback: 'Roadmap / Feedback',
     files_selected: 'files selected',
     filter_group: 'Filter Group',
@@ -822,6 +864,20 @@ export default {
     people: 'People',
     profile: 'Profile',
     production: 'Production',
+    record_audio: 'Record audio',
+    record_video: 'Record video',
+    recording: {
+      webcam: 'Webcam',
+      screen: 'Screen',
+      microphone: 'Microphone',
+      start: 'Start',
+      stop: 'Stop',
+      cancel: 'Cancel',
+      recording: 'Recording',
+      permission_denied: 'Permission denied. Allow microphone/camera access and try again.',
+      no_device: 'No microphone or camera found.',
+      not_supported: 'Recording is not supported in this browser.'
+    },
     remove: 'Remove',
     remove_search_query: 'Are you sure you want to remove the search query "{name}"?',
     remove_search_filter_group: 'Are you sure you want to remove the search filter group "{name}"?',
@@ -862,6 +918,10 @@ export default {
       type: 'Type at least 3 characters to perform the search',
       no_result: 'There are no results for this search',
       no_filter: 'Select at least one filter to perform the search'
+    },
+    annotations: {
+      download_pdf: 'Download annotations as PDF',
+      download_zip: 'Download annotations as ZIP'
     },
     csv: {
       choose: 'Choose',
@@ -1039,6 +1099,10 @@ export default {
     title: 'People',
     unactive: 'Inactive',
     guests: 'guest | guests',
+    archived_guests: 'Archived guests',
+    archive_guest_confirm: 'Archive this guest? Their comments stay in place, but they no longer appear in the active guests list.',
+    archive_guest_error: 'Could not archive this guest. Please try again.',
+    restore_guest_error: 'Could not restore this guest. Please try again.',
     email_domain_error: 'This email domain is not allowed.',
     email_exist_error: 'This email is already in use by another user.',
     user_limit_error: 'You have reached your user limit. Please contact our team to upgrade your plan.',
@@ -1049,6 +1113,8 @@ export default {
     fields: {
       active: 'Active',
       contract: 'Contract',
+      country: 'Country',
+      created_at: 'Creation date',
       daily_salary: 'Daily rate',
       departments: 'Departments',
       email: 'Email',
@@ -1066,6 +1132,7 @@ export default {
     list: {
       active: 'Active',
       contract: 'Contract',
+      country: 'Country',
       departments: 'Departments',
       email: 'Email',
       expiration: 'Expiration',
@@ -1117,10 +1184,16 @@ export default {
     add_selection: 'Add selection',
     add_sequences: 'Add sequences',
     add_shots: 'Add shots',
+    add_edits: 'Add edits',
+    add_episodes: 'Add episodes',
     add_sequence: 'Add entire sequence',
     add_episode: 'Add entire episode',
     add_movie: 'Add entire movie',
     apply_task_type_change: 'This will set the last revision for the given task type on all entities.',
+    update_versions_title: 'Update selected versions',
+    update_to_latest_version: 'Update to latest version',
+    update_to_latest_version_help:
+      'Set the latest revision for each entity, keeping its current task type.',
     available_build: 'Available builds',
     build_daily: 'Daily pending',
     build_weekly: 'All Pending',
@@ -1131,6 +1204,7 @@ export default {
     comparing_missing_plan: 'Entity missing for current type',
     create_for_selection: 'Generate a playlist from selected tasks',
     create_title: 'Create playlist',
+    created: 'Playlist “{name}” created.',
     created_at: 'Created at:',
     delete_text: 'Are you sure you want to remove {name} from your database?',
     delete_error: 'An error occurred while deleting this playlist.',
@@ -1158,6 +1232,7 @@ export default {
       can_comment: 'Allow comments',
       generate: 'Generate a new link',
       copy: 'Copy link',
+      open: 'Open link in a new tab',
       revoke: 'Revoke link',
       revoke_confirm: 'Revoke this link? Anyone using it will lose access.',
       no_links: 'No share links yet. Create one below to give external reviewers access.',
@@ -1195,6 +1270,7 @@ export default {
     unmute: 'Unmute',
     updated_at: 'Updated at:',
     remove: 'remove',
+    view_created: 'View playlist',
     volume_level: 'Volume: {level}%',
     fields: {
       name: 'Name',
@@ -1210,11 +1286,16 @@ export default {
       annotation_delete: 'Delete annotation',
       annotation_erase: 'Erase annotation',
       annotation_redo: 'Redo annotation',
+      annotation_shape: 'Shape',
       annotation_undo: 'Undo annotation',
+      annotation_huge: 'Huge',
       annotation_big: 'Big',
       annotation_medium: 'Medium',
       annotation_small: 'Small',
-      annotation_zoom_pan: 'Enable zoom and pan',
+      annotation_tiny: 'Tiny',
+      annotation_zoom_pan: 'Reset zoom',
+      onion_skin: 'Onion skin frames',
+      onion_skin_off: 'Off',
       change_task_type: 'Change task type',
       current_time: 'Position in the video',
       comments: 'Show/Hide comments',
@@ -1302,7 +1383,7 @@ export default {
       give_a_name: 'Give your production a name',
       give_a_name_description: 'Start by giving your production a meaningful name.',
       choose_template: 'Apply a production template (optional)',
-      choose_template_description: 'Pick a template to pre-fill task types, task statuses, asset types, metadata and settings. Leave empty to configure the  from scratch.',
+      choose_template_description: 'Pick a template to pre-fill task types, task statuses, asset types, metadata and settings. Leave empty to configure the production from scratch.',
       no_template: 'No template',
       import_assets_button: 'Import assets',
       import_shots_button: 'Import shots',
@@ -1338,12 +1419,14 @@ export default {
       is_preview_download_allowed: 'Allow artists to download previews',
       is_publish_default: 'Set comment widget for artists on publish mode by default',
       is_set_preview_automated: 'Set new preview as entity thumbnail automatically',
+      is_single_preview_per_revision: 'Allow only one preview file per revision',
       max_retakes: 'Maximum number of retakes',
       name: 'Name',
       nb_episodes: 'Number of episodes',
       homepage: 'Homepage (first page displayed)',
       ratio: 'Ratio',
       resolution: 'Resolution',
+      revision_padding: 'Revision number padding (0 = no padding)',
       start_date: 'Start date',
       status: 'Status',
       style: 'Style',
@@ -2153,6 +2236,7 @@ export default {
   },
 
   row_actions: {
+    archive: 'Archive',
     change_avatar: 'Change avatar',
     change_password: 'Change password',
     delete: 'Delete',

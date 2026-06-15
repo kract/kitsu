@@ -24,21 +24,22 @@
             :font-size="12"
             :person="comment.person"
             :is-link="!isCurrentUserClient"
-            v-if="!isCurrentUserClient || isAuthorClient"
+            v-if="comment.person?.id"
           />
-          <strong class="flexrow-item">
-            <people-name
-              :person="comment.person"
-              v-if="!isCurrentUserClient || isAuthorClient"
-            />
-          </strong>
+          <people-name
+            class="flexrow-item strong"
+            :person="comment.person"
+            v-if="comment.person?.id"
+          />
           <div class="filler"></div>
           <span class="flexrow-item date" :title="fullDate">
             {{ shortDate }}
           </span>
           <div
             class="flexrow-item menu-wrapper"
-            v-if="isPinnable || isEditable || canToggleForClient"
+            v-if="
+              isPinnable || isEditable || canToggleForClient || canMoveComment
+            "
           >
             <chevron-down-icon class="menu-icon" @click="toggleCommentMenu" />
             <comment-menu
@@ -46,6 +47,7 @@
               :is-pinned="comment.pinned"
               :is-editable="isEditable"
               :can-toggle-for-client="canToggleForClient"
+              :can-move="canMoveComment"
               :is-for-client="Boolean(comment.for_client)"
               @pin-clicked="
                 () => {
@@ -62,6 +64,12 @@
               @delete-clicked="
                 () => {
                   emit('delete-comment', comment)
+                  toggleCommentMenu()
+                }
+              "
+              @move-clicked="
+                () => {
+                  emit('move-comment', comment)
                   toggleCommentMenu()
                 }
               "
@@ -132,6 +140,20 @@
                   :src="getDownloadAttachmentPath(attachment)"
                 />
               </a>
+              <attachment-audio-player
+                v-for="attachment in audioAttachments"
+                :key="attachment.id"
+                :src="getDownloadAttachmentPath(attachment)"
+                :name="attachment.name"
+                :download-href="getDownloadAttachmentPath(attachment)"
+              />
+              <attachment-video-player
+                v-for="attachment in videoAttachments"
+                :key="attachment.id"
+                :src="getDownloadAttachmentPath(attachment)"
+                :name="attachment.name"
+                :download-href="getDownloadAttachmentPath(attachment)"
+              />
               <a
                 :href="getDownloadAttachmentPath(attachment)"
                 :key="attachment.id"
@@ -153,18 +175,19 @@
                 v-for="replyComment in comment.replies || []"
               >
                 <div class="flexrow">
-                  <people-avatar
-                    class="flexrow-item"
-                    :size="18"
-                    :font-size="10"
-                    :person="personMap.get(replyComment.person_id)"
-                    :is-link="!isCurrentUserClient"
-                  />
-                  <strong class="flexrow-item">
-                    <people-name
-                      :person="personMap.get(replyComment.person_id)"
+                  <template v-if="replyComment.person?.id">
+                    <people-avatar
+                      class="flexrow-item"
+                      :size="18"
+                      :font-size="10"
+                      :person="replyComment.person"
+                      :is-link="!isCurrentUserClient"
                     />
-                  </strong>
+                    <people-name
+                      class="flexrow-item strong"
+                      :person="replyComment.person"
+                    />
+                  </template>
                   <span
                     class="flexrow-item reply-date"
                     :title="replyFullDate(replyComment.date)"
@@ -212,6 +235,22 @@
                       :src="getDownloadAttachmentPath(attachment)"
                     />
                   </a>
+                  <attachment-audio-player
+                    v-for="attachment in replyAttachmentMap.get(replyComment.id)
+                      ?.audio"
+                    :key="attachment.id"
+                    :src="getDownloadAttachmentPath(attachment)"
+                    :name="attachment.name"
+                    :download-href="getDownloadAttachmentPath(attachment)"
+                  />
+                  <attachment-video-player
+                    v-for="attachment in replyAttachmentMap.get(replyComment.id)
+                      ?.video"
+                    :key="attachment.id"
+                    :src="getDownloadAttachmentPath(attachment)"
+                    :name="attachment.name"
+                    :download-href="getDownloadAttachmentPath(attachment)"
+                  />
                   <a
                     :href="getDownloadAttachmentPath(attachment)"
                     :key="attachment.id"
@@ -418,7 +457,7 @@
           :font-size="12"
           :is-link="!isCurrentUserClient"
         />
-        <people-name class="flexrow-item" :person="comment.person" />
+        <people-name class="flexrow-item strong" :person="comment.person" />
         <span class="filler"> </span>
         <span class="flexrow-item date" :title="fullDate">
           {{ shortDate }}
@@ -456,6 +495,7 @@
       ref="addAttachmentModalRef"
       :active="modals.addAttachment"
       :title="$t('comments.add_attachment_to_reply')"
+      :name-prefix="attachmentNamePrefix"
       @cancel="modals.addAttachment = false"
       @confirm="addAttachmentToReply"
       v-if="modals.addAttachment"
@@ -497,6 +537,8 @@ import { useAtMentionsMembers } from '@/composables/atMentions'
 import { domMixin } from '@/components/mixins/dom'
 
 import AddAttachmentModal from '@/components/modals/AddAttachmentModal.vue'
+import AttachmentAudioPlayer from '@/components/players/viewers/AttachmentAudioPlayer.vue'
+import AttachmentVideoPlayer from '@/components/players/viewers/AttachmentVideoPlayer.vue'
 import ButtonSimple from '@/components/widgets/ButtonSimple.vue'
 import CommentMenu from '@/components/widgets/CommentMenu.vue'
 import Checklist from '@/components/widgets/Checklist.vue'
@@ -517,6 +559,7 @@ const emit = defineEmits([
   'delete-comment',
   'duplicate-comment',
   'edit-comment',
+  'move-comment',
   'pin-comment',
   'time-code-clicked',
   'toggle-for-client'
@@ -540,6 +583,10 @@ const props = defineProps({
     default: false
   },
   isCheckable: {
+    type: Boolean,
+    default: false
+  },
+  canMove: {
     type: Boolean,
     default: false
   },
@@ -604,11 +651,27 @@ const personMap = computed(() => store.getters.personMap)
 const taskTypeMap = computed(() => store.getters.taskTypeMap)
 const user = computed(() => store.getters.user)
 
+const attachmentNamePrefix = computed(() =>
+  stringHelpers.attachmentNamePrefix(
+    props.task?.entity_name,
+    taskTypeMap.value.get(props.task?.task_type_id)?.name
+  )
+)
+
 const isConcept = computed(() => {
   return route.path.includes('concept')
 })
 
 const canToggleForClient = computed(() => isCurrentUserManager.value)
+
+const isPreviewBound = computed(() => {
+  return Boolean(
+    props.comment.preview_file_id ||
+    (props.comment.previews && props.comment.previews.length > 0)
+  )
+})
+
+const canMoveComment = computed(() => props.canMove && !isPreviewBound.value)
 
 const isEmpty = computed(() => {
   return (
@@ -674,9 +737,24 @@ const pictureAttachments = computed(() => {
     )
 })
 
+const audioAttachments = computed(() => {
+  return commentAttachments.value.filter(attachment =>
+    files.AUDIO_EXTENSIONS.includes(attachment.extension)
+  )
+})
+
+const videoAttachments = computed(() => {
+  return commentAttachments.value.filter(attachment =>
+    files.VIDEO_EXTENSIONS.includes(attachment.extension)
+  )
+})
+
 const fileAttachments = computed(() => {
   return commentAttachments.value.filter(
-    attachment => !files.IMG_EXTENSIONS.includes(attachment.extension)
+    attachment =>
+      !files.IMG_EXTENSIONS.includes(attachment.extension) &&
+      !files.AUDIO_EXTENSIONS.includes(attachment.extension) &&
+      !files.VIDEO_EXTENSIONS.includes(attachment.extension)
   )
 })
 
@@ -687,13 +765,20 @@ const replyAttachmentMap = computed(() => {
       if (!map.has(attachment.reply_id)) {
         map.set(attachment.reply_id, {
           pictures: [],
+          audio: [],
+          video: [],
           files: []
         })
       }
+      const bucket = map.get(attachment.reply_id)
       if (files.IMG_EXTENSIONS.includes(attachment.extension)) {
-        map.get(attachment.reply_id).pictures.push(attachment)
+        bucket.pictures.push(attachment)
+      } else if (files.AUDIO_EXTENSIONS.includes(attachment.extension)) {
+        bucket.audio.push(attachment)
+      } else if (files.VIDEO_EXTENSIONS.includes(attachment.extension)) {
+        bucket.video.push(attachment)
       } else {
-        map.get(attachment.reply_id).files.push(attachment)
+        bucket.files.push(attachment)
       }
     }
   })
@@ -718,7 +803,9 @@ const boxShadowStyle = computed(() => {
 })
 
 const isAuthorClient = computed(() => {
-  return personMap.value.get(props.comment.person_id)?.role === 'client'
+  const author =
+    personMap.value.get(props.comment.person_id) || props.comment.person
+  return author?.role === 'client'
 })
 
 const shortenText = (text, length) => {

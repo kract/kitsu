@@ -128,6 +128,12 @@
           v-if="currentProduction && currentProduction.id"
         />
         <combobox-boolean
+          :label="$t('productions.fields.is_single_preview_per_revision')"
+          @enter="runConfirmation"
+          v-model="form.is_single_preview_per_revision"
+          v-if="currentProduction && currentProduction.id"
+        />
+        <combobox-boolean
           :label="$t('productions.fields.is_publish_default')"
           @enter="runConfirmation"
           v-model="form.is_publish_default_for_artists"
@@ -139,6 +145,16 @@
           :label="$t('productions.fields.max_retakes')"
           @enter="runConfirmation"
           v-model="form.max_retakes"
+          v-if="currentProduction && currentProduction.id"
+        />
+        <text-field
+          type="number"
+          :step="1"
+          :min="0"
+          :max="8"
+          :label="$t('productions.fields.revision_padding')"
+          @enter="runConfirmation"
+          v-model="form.revision_padding"
           v-if="currentProduction && currentProduction.id"
         />
         <div v-if="currentProduction && currentProduction.id">
@@ -209,9 +225,11 @@ const emptyForm = () => ({
   nb_episodes: 0,
   episode_span: 0,
   max_retakes: 0,
+  revision_padding: 0,
   is_clients_isolated: 'false',
   is_preview_download_allowed: 'false',
   is_set_preview_automated: 'false',
+  is_single_preview_per_revision: 'false',
   is_publish_default_for_artists: 'false',
   fps: '',
   ratio: '',
@@ -262,12 +280,16 @@ const resetForm = () => {
       episode_span: production.episode_span,
       fps: production.fps,
       max_retakes: production.max_retakes,
+      revision_padding: production.revision_padding,
       nb_episodes: production.nb_episodes,
       is_clients_isolated: production.is_clients_isolated ? 'true' : 'false',
       is_preview_download_allowed: production.is_preview_download_allowed
         ? 'true'
         : 'false',
       is_set_preview_automated: production.is_set_preview_automated
+        ? 'true'
+        : 'false',
+      is_single_preview_per_revision: production.is_single_preview_per_revision
         ? 'true'
         : 'false',
       is_publish_default_for_artists: production.is_publish_default_for_artists

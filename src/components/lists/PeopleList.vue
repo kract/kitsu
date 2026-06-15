@@ -28,6 +28,9 @@
             <th scope="col" class="studio" v-if="!isBots && !isGuests">
               {{ $t('people.list.studio') }}
             </th>
+            <th scope="col" class="country" v-if="!isBots && !isGuests">
+              {{ $t('people.list.country') }}
+            </th>
             <th scope="col" class="contract" v-if="!isBots && !isGuests">
               {{ $t('people.list.contract') }}
             </th>
@@ -79,6 +82,9 @@
             <td class="studio" v-if="!isBots && !isGuests">
               <studio-name :studio="person.studio" v-if="person.studio" />
             </td>
+            <td class="country" v-if="!isBots && !isGuests">
+              {{ countryName(person.country) }}
+            </td>
             <td class="contract" v-if="!isBots && !isGuests">
               {{ $t(`people.contract.${person.contract_type}`) }}
             </td>
@@ -99,17 +105,22 @@
             </td>
             <row-actions-cell
               class="datatable-row-footer"
+              :entry="person"
+              :hide-archive="!isGuests || isArchivedGuests"
               :hide-avatar="isGuests || !person.active"
               :hide-change-password="isBots || isGuests || !person.active"
-              :hide-delete="person.active && !isGuests"
+              :hide-delete="isGuests ? !isArchivedGuests : person.active"
               :hide-edit="isGuests"
               :hide-refresh="!isBots || !person.active"
+              :hide-restore="!isArchivedGuests"
+              @archive-clicked="$emit('archive-clicked', person)"
               @avatar-clicked="$emit('avatar-clicked', person)"
               @change-password-clicked="
                 $emit('change-password-clicked', person)
               "
               @edit-clicked="$emit('edit-clicked', person)"
               @refresh-clicked="$emit('refresh-clicked', person)"
+              @restore-clicked="$emit('restore-clicked', person)"
               @delete-clicked="$emit('delete-clicked', person)"
               v-if="isCurrentUserAdmin"
             />
@@ -119,7 +130,7 @@
       </table>
     </div>
 
-    <table-info :is-loading="isLoading" :is-error="isError" :cells="8" />
+    <table-info :is-loading="isLoading" :is-error="isError" :cells="9" />
 
     <p class="has-text-centered footer-info" v-if="!isLoading">
       {{ nbUsersDetails }}
@@ -130,6 +141,9 @@
 <script>
 import { AlertTriangleIcon } from 'lucide-vue-next'
 import { mapGetters } from 'vuex'
+
+import { getCountryName } from '@/lib/countries'
+import { localeCode } from '@/lib/lang'
 
 import { grabListMixin } from '@/components/mixins/grablist'
 import { domMixin } from '@/components/mixins/dom'
@@ -159,6 +173,10 @@ export default {
       type: Array,
       default: () => []
     },
+    isArchivedGuests: {
+      type: Boolean,
+      default: false
+    },
     isBots: {
       type: Boolean,
       default: false
@@ -182,11 +200,13 @@ export default {
   },
 
   emits: [
+    'archive-clicked',
     'avatar-clicked',
     'change-password-clicked',
     'delete-clicked',
     'edit-clicked',
-    'refresh-clicked'
+    'refresh-clicked',
+    'restore-clicked'
   ],
 
   data() {
@@ -246,6 +266,10 @@ export default {
   },
 
   methods: {
+    countryName(country) {
+      return getCountryName(country, localeCode.value)
+    },
+
     isExpired(expirationDate) {
       return expirationDate < this.today
     },
@@ -307,6 +331,11 @@ export default {
 .studio {
   width: 180px;
   min-width: 180px;
+}
+
+.country {
+  width: 160px;
+  min-width: 160px;
 }
 
 .contract {
@@ -444,6 +473,7 @@ export default {
 
   .phone,
   .studio,
+  .country,
   .contract,
   .position,
   .seniority,

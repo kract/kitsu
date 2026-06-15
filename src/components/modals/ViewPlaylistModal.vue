@@ -30,10 +30,13 @@
       :active="modals.edit"
       :is-loading="loading.edit"
       :is-error="errors.edit"
+      :is-success="editSuccess"
+      :success-text="successText"
       :playlist-to-edit="playlistToEdit"
       :type-disabled="true"
       @confirm="savePlaylist"
-      @cancel="modals.edit = false"
+      @view="onViewCreatedPlaylist"
+      @cancel="closeEditModal"
     />
   </div>
 </template>
@@ -45,21 +48,25 @@
  */
 
 import { computed, ref, toRef, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { useStore } from 'vuex'
 
 import { useModal } from '@/composables/modal'
+import { getPlaylistPath } from '@/lib/path'
 import { DEFAULT_NB_FRAMES_PICTURE } from '@/lib/playlist'
 
 import EditPlaylistModal from '@/components/modals/EditPlaylistModal.vue'
 // eslint-disable-next-line no-unused-vars
-import PlaylistPlayer from '@/components/pages/playlists/PlaylistPlayer.vue'
+import PlaylistPlayer from '@/components/players/players/PlaylistPlayer.vue'
 
 import assetStore from '@/store/modules/assets'
 import shotStore from '@/store/modules/shots'
 import sequenceStore from '@/store/modules/sequences'
 
+const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const store = useStore()
 
 const props = defineProps({
@@ -83,6 +90,8 @@ const errors = ref({ edit: false })
 const isLoading = ref(false)
 const loading = ref({ edit: false })
 const modals = ref({ edit: false })
+const editSuccess = ref(false)
+const createdPlaylist = ref(null)
 const playlistPlayer = ref(null)
 const playlistToEdit = ref({})
 let previewFileMap = new Map()
@@ -99,9 +108,17 @@ const currentTaskIds = computed(
 
 const isPlaylistPage = computed(() => route.path.indexOf('playlist') > 0)
 
+const successText = computed(() =>
+  createdPlaylist.value
+    ? t('playlists.created', { name: createdPlaylist.value.name })
+    : ''
+)
+
 const currentEntityType = computed(() => {
   if (route.path.indexOf('asset') > 0) return 'asset'
   if (route.path.indexOf('sequence') > 0) return 'sequence'
+  if (route.path.indexOf('edit') > 0) return 'edit'
+  if (route.path.indexOf('episode') > 0) return 'episode'
   return 'shot'
 })
 
@@ -171,6 +188,13 @@ const convertEntityToPlaylistFormat = entityInfo => {
     name: entity.name,
     nb_frames:
       entityInfo.nb_frames || entity.nb_frames || DEFAULT_NB_FRAMES_PICTURE,
+    // Per-entity fps: an entity can override the production fps via
+    // data.fps. Carried here so the player uses the right rate (same
+    // enrichment as the Playlist page).
+    fps:
+      parseFloat(entity.data?.fps) ||
+      parseFloat(currentProduction.value?.fps) ||
+      25,
     parent_name:
       entity.sequence_name || entity.episode_name || entity.asset_type_name,
     preview_files: entityInfo.preview_files,
@@ -226,7 +250,35 @@ const setupEntities = entities => {
 
 const onSaveClicked = () => {
   playlistToEdit.value = { for_entity: currentEntityType.value }
+  editSuccess.value = false
+  createdPlaylist.value = null
   modals.value.edit = true
+}
+
+// Each entity carries its preview files grouped by task type. When a task type
+// is chosen for the playlist, save that task type's preview for every entity so
+// the playlist shows the right revisions, not the temp playlist's default ones.
+const pickPreviewFileId = (shot, taskTypeId) => {
+  const previews = taskTypeId && shot.preview_files?.[taskTypeId]
+  return previews?.length ? previews[0].id : shot.preview_file_id
+}
+
+const closeEditModal = () => {
+  modals.value.edit = false
+  editSuccess.value = false
+}
+
+const onViewCreatedPlaylist = () => {
+  if (!createdPlaylist.value) return
+  modals.value.edit = false
+  emit('cancel')
+  router.push(
+    getPlaylistPath(
+      currentProduction.value.id,
+      currentEpisode.value?.id,
+      createdPlaylist.value.id
+    )
+  )
 }
 
 const savePlaylist = async form => {
@@ -250,15 +302,18 @@ const savePlaylist = async form => {
       name: playlist.name,
       for_client: playlist.for_client,
       for_entity: playlist.for_entity,
-      is_for_all: playlist.is_for_all
+      is_for_all: playlist.is_for_all,
+      task_type_id: form.task_type_id
     })
     const playlistToSave = { ...currentPlaylist.value }
     playlistToSave.shots = currentPlaylist.value.shots.map(shot => ({
       entity_id: shot.id,
-      preview_file_id: shot.preview_file_id
+      preview_file_id: pickPreviewFileId(shot, form.task_type_id)
     }))
     await store.dispatch('editPlaylist', { data: playlistToSave })
-    modals.value.edit = false
+    createdPlaylist.value = playlist
+    editSuccess.value = true
+    loading.value.edit = false
     store.dispatch('loadPlaylists', {})
   } catch (err) {
     console.error(err)
@@ -274,6 +329,9 @@ watch(
       currentEntities.value = []
       previewFileMap = new Map()
       previewFileEntityMap = new Map()
+      editSuccess.value = false
+      createdPlaylist.value = null
+      modals.value.edit = false
       isLoading.value = true
       store
         .dispatch('loadTempPlaylist', {

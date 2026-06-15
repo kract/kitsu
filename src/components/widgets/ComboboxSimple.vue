@@ -45,7 +45,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:model-value'])
 
 const selectedOption = ref({
   label: '',
@@ -53,7 +53,7 @@ const selectedOption = ref({
 })
 
 const selectOption = option => {
-  emit('update:modelValue', option.value)
+  emit('update:model-value', option.value)
   selectedOption.value = option
 }
 
@@ -89,7 +89,7 @@ watch(
 watch(
   () => props.modelValue,
   () => {
-    selectedOption.value = props.options.find(o => o.value === props.modelValue)
+    resetOptions()
   }
 )
 </script>

@@ -78,7 +78,7 @@ const helpers = {
 
     if (person.has_avatar) {
       const lastUpdate = person.updated_at || person.created_at
-      const timestamp = Date.parse(lastUpdate)
+      const timestamp = Date.parse(lastUpdate) || ''
       person.avatarPath = `/api/pictures/thumbnails/persons/${person.id}.png?t=${timestamp}`
     }
 
@@ -340,6 +340,18 @@ const actions = {
   async deletePeople({ commit }, person) {
     await peopleApi.deletePerson(person)
     commit(DELETE_PEOPLE_END)
+  },
+
+  async archivePerson({ commit }, person) {
+    const updated = await peopleApi.setPersonActive(person.id, false)
+    commit(EDIT_PEOPLE_END, updated)
+    return updated
+  },
+
+  async restorePerson({ commit }, person) {
+    const updated = await peopleApi.setPersonActive(person.id, true)
+    commit(EDIT_PEOPLE_END, updated)
+    return updated
   },
 
   async changePasswordPerson({}, { person, form }) {
@@ -699,7 +711,8 @@ const mutations = {
     cache.peopleIndex = buildPeopleIndex(cache.people)
     if (state.peopleSearchText) {
       const keywords = getKeyWords(state.peopleSearchText)
-      state.displayedPeople = indexSearch(cache.peopleIndex, keywords)
+      state.displayedPeople =
+        indexSearch(cache.peopleIndex, keywords) || cache.people
     } else {
       state.displayedPeople = cache.people
     }
@@ -708,24 +721,36 @@ const mutations = {
   [EDIT_PEOPLE_END](state, person) {
     person = helpers.addAdditionalInformation(person)
     if (person.name) {
-      const personToEditIndex = cache.people.findIndex(
-        ({ id }) => id === person.id
-      )
-      if (personToEditIndex >= 0) {
-        cache.people[personToEditIndex] = person
-      } else if (!cache.personMap.has(person.id)) {
-        cache.people.push(person)
+      if (person.is_guest) {
+        const guestIndex = cache.guests.findIndex(({ id }) => id === person.id)
+        if (guestIndex >= 0) {
+          cache.guests[guestIndex] = person
+        } else {
+          cache.guests.push(person)
+        }
+        cache.guests = sortPeople(cache.guests)
+        state.guests = cache.guests
+      } else {
+        const personToEditIndex = cache.people.findIndex(
+          ({ id }) => id === person.id
+        )
+        if (personToEditIndex >= 0) {
+          cache.people[personToEditIndex] = person
+        } else if (!cache.personMap.has(person.id)) {
+          cache.people.push(person)
+        }
+        cache.people = sortPeople(cache.people)
+        cache.peopleIndex = buildPeopleIndex(cache.people)
+        if (state.peopleSearchText) {
+          const keywords = getKeyWords(state.peopleSearchText)
+          state.displayedPeople =
+            indexSearch(cache.peopleIndex, keywords) || cache.people
+        } else {
+          state.displayedPeople = cache.people
+        }
       }
       cache.personMap.set(person.id, person)
       state.personMapVersion++
-      cache.people = sortPeople(cache.people)
-      cache.peopleIndex = buildPeopleIndex(cache.people)
-      if (state.peopleSearchText) {
-        const keywords = getKeyWords(state.peopleSearchText)
-        state.displayedPeople = indexSearch(cache.peopleIndex, keywords)
-      } else {
-        state.displayedPeople = cache.people
-      }
     }
   },
 
