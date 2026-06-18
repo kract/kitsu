@@ -1738,12 +1738,10 @@ const {
   postComparisonPanZoomChanged
 } = previewRoom
 
-// Keyboard shortcuts (common subset; PlaylistPlayer-specific keys are
-// handled below in onKeyDown). Letter-based shortcuts must go through
-// this composable: it matches on event.key (the typed character) so they
-// work on non-QWERTY layouts. The onKeyDown below matches on event.code
-// (physical position) and is reserved for keys where that's correct
-// (arrows, Home/End, Delete) plus the playlist-specific entity logic.
+// Keyboard shortcuts: the common subset goes through this composable;
+// PlaylistPlayer-specific keys are handled below in onKeyDown (event.code:
+// arrows, Home/End, Delete, plus the playlist entity logic). See
+// usePreviewShortcuts / isAltLetter for how letter shortcuts are matched.
 
 const { isAltHeld } = usePreviewShortcuts({
   onDelete: () => deleteSelection(),
@@ -2865,6 +2863,32 @@ const ensureEntityAnnotationsLoaded = entity => {
     })
 }
 
+// Load annotations for the *current* preview, whether it is the entity's
+// main preview (index 0) or one of its sub-previews (index > 0). Annotations
+// live on the entity for the main preview and on the sub-preview object
+// otherwise; both are stripped from the playlist payload and fetched here.
+const ensureCurrentPreviewAnnotations = () => {
+  const entity = currentEntity.value
+  const preview = currentPreview.value
+  if (!entity || !preview?.id) return Promise.resolve([])
+  const index = currentPreviewIndex.value
+  const target =
+    index === 0 ? entity : entity.preview_file_previews?.[index - 1]
+  const key = index === 0 ? 'preview_file_annotations' : 'annotations'
+  if (!target) return Promise.resolve([])
+  if (target[key] !== undefined) return Promise.resolve(target[key])
+  return store
+    .dispatch('loadPreviewFileAnnotations', preview.id)
+    .then(loaded => {
+      if (target[key] === undefined) target[key] = loaded || []
+      return target[key]
+    })
+    .catch(() => {
+      if (target[key] === undefined) target[key] = []
+      return target[key]
+    })
+}
+
 const prefetchAnnotationsAround = index => {
   const start = Math.max(0, index - ANNOTATION_PREFETCH_RADIUS)
   const end = Math.min(
@@ -3433,6 +3457,8 @@ const changePreviewFile = (entity, previewFile, previousPreviewFileId) => {
     previousPreviewFileId
   })
   clearCanvas()
+  resetPanZoom()
+  panzoomTransform.value = { x: 0, y: 0, scale: 1 }
 }
 
 const onEntityDropped = info => {
@@ -4228,6 +4254,7 @@ watch(currentPreviewIndex, () => {
   })
   if (currentPreview.value) {
     resetPanZoom()
+    panzoomTransform.value = { x: 0, y: 0, scale: 1 }
     movieDimensions.value = {
       width: currentPreview.value.width,
       height: currentPreview.value.height
@@ -4265,6 +4292,7 @@ watch(playingEntityIndex, () => {
         resetCanvas()
       }
       resetPanZoom()
+      panzoomTransform.value = { x: 0, y: 0, scale: 1 }
       resetCanvasVisibility()
     })
   })
@@ -4394,10 +4422,8 @@ watch(
   previewFileId => {
     prefetchAnnotationsAround(playingEntityIndex.value)
     if (!previewFileId) return
-    const entity = currentEntity.value
-    if (!entity || entity.preview_file_annotations !== undefined) return
     const token = ++annotationLoadToken
-    ensureEntityAnnotationsLoaded(entity).then(loaded => {
+    ensureCurrentPreviewAnnotations().then(loaded => {
       if (token !== annotationLoadToken) return
       if (currentPreview.value?.id !== previewFileId) return
       annotations.value = loaded || []

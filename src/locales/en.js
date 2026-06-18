@@ -145,6 +145,7 @@ export default {
     analytics: 'Budget Analytics',
     cash_evolution: 'Expense evolution',
     cash_repartition: 'Expense repartition',
+    clear_exception: "Clear this month's salary override",
     cost: 'Cost',
     costs: 'Real Costs',
     departments: 'Departments',
@@ -713,9 +714,9 @@ export default {
       recovery_code: 'Recovery code'
     },
     login_with_saml: 'SSO login with {saml_idp_name}',
-    login_saml: 'SSO login',
+    saml: 'SSO login',
     login_with_oidc: 'SSO login with {oidc_idp_name}',
-    login_oidc: 'SSO login',
+    oidc: 'SSO login',
   },
 
   logs: {
