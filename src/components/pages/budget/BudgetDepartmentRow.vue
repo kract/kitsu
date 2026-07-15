@@ -1,7 +1,11 @@
 <template>
   <tr
     class="datatable-row department-row pointer"
+    role="button"
+    tabindex="0"
     @click="toggleDepartment(departmentEntry.id)"
+    @keydown.enter.prevent="toggleDepartment(departmentEntry.id)"
+    @keydown.space.prevent="toggleDepartment(departmentEntry.id)"
   >
     <td class="datatable-row-header strong department-header" colspan="3">
       <div
@@ -34,21 +38,25 @@
         :style="getDepartmentStyle(departmentEntry.id, '33')"
         v-for="month in monthsBetweenStartAndNow"
       >
-        {{ departmentExpense?.[month.format('YYYY-MM')]?.toLocaleString() }}
+        {{
+          departmentExpense?.[month.format('YYYY-MM')]?.toLocaleString(
+            localeCode
+          )
+        }}
       </td>
       <td
         class="total-cost remaining-previsional"
         :style="getDepartmentStyle(departmentEntry.id, '33')"
         v-if="isShowingExpenses"
       >
-        {{ departmentExpense.total.toLocaleString() }}
+        {{ departmentExpense.total.toLocaleString(localeCode) }}
       </td>
       <td
         class="total-cost"
         :style="getDepartmentStyle(departmentEntry.id, '33')"
         v-if="isShowingExpenses"
       >
-        {{ departmentDonePrevisional.toLocaleString() }}
+        {{ departmentDonePrevisional.toLocaleString(localeCode) }}
       </td>
       <td
         class="total-cost gap"
@@ -60,7 +68,9 @@
         v-if="isShowingExpenses"
       >
         {{
-          (departmentDonePrevisional - departmentExpense.total).toLocaleString()
+          (departmentDonePrevisional - departmentExpense.total).toLocaleString(
+            localeCode
+          )
         }}
       </td>
     </template>
@@ -79,7 +89,7 @@
       :style="getDepartmentStyle(departmentEntry.id, '33')"
       v-if="isShowingExpenses"
     >
-      {{ departmentRemainingPrevisional.toLocaleString() }}
+      {{ departmentRemainingPrevisional.toLocaleString(localeCode) }}
     </td>
     <td
       :style="getDepartmentStyle(departmentEntry.id, '33')"
@@ -89,7 +99,7 @@
       {{
         (
           departmentExpense.total + departmentRemainingPrevisional
-        ).toLocaleString()
+        ).toLocaleString(localeCode)
       }}
     </td>
     <td
@@ -107,7 +117,7 @@
       }"
       v-if="isShowingExpenses"
     >
-      {{ departmentTotalGap.toLocaleString() }}
+      {{ departmentTotalGap.toLocaleString(localeCode) }}
     </td>
     <td
       class="actions"
@@ -117,6 +127,7 @@
 </template>
 
 <script setup>
+import { localeCode } from '@/lib/lang'
 import { computed } from 'vue'
 
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-vue-next'
@@ -221,7 +232,7 @@ const getDepartmentMonthCost = (departmentEntry, month) => {
     cost += props.hardwareItemsCosts[departmentEntry.id]?.[monthKey] || 0
     cost += props.softwareLicensesCosts[departmentEntry.id]?.[monthKey] || 0
   }
-  return cost ? cost.toLocaleString() : ''
+  return cost ? cost.toLocaleString(localeCode.value) : ''
 }
 </script>
 

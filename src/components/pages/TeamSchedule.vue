@@ -102,7 +102,14 @@
 
     <div class="column side-column" v-if="isTaskSidePanelOpen">
       <task-info>
-        <a class="close-button" @click="toggleTaskSidePanel">
+        <a
+          class="close-button"
+          role="button"
+          tabindex="0"
+          @click="toggleTaskSidePanel"
+          @keydown.enter.prevent="toggleTaskSidePanel"
+          @keydown.space.prevent="toggleTaskSidePanel"
+        >
           <x-icon class="align-middle" :size="16" />
         </a>
         <h2 class="mt1">
@@ -160,7 +167,7 @@
                     <div class="flexrow">
                       <em v-if="task.man_days">
                         {{ task.man_days }}
-                        {{ $tc('main.man_days', task.man_days) }}
+                        {{ $t('main.man_days', task.man_days) }}
                       </em>
                       <em v-else>
                         {{ $t('main.no_estimation') }}

@@ -134,13 +134,15 @@
       :active="modals.isCreateTasksDisplayed"
       :is-loading="loading.creatingTasks"
       :is-loading-stay="loading.creatingTasksStay"
+      :is-loading-all="loading.creatingAllTasks"
       :is-error="errors.creatingTasks"
       :title="$t('tasks.create_tasks_sequence')"
-      :text="$t('tasks.create_tasks_sequence_explaination')"
+      :text="$t('tasks.create_tasks_sequence_explanation')"
       :error-text="$t('tasks.create_tasks_sequence_failed')"
       @cancel="hideCreateTasksModal"
       @confirm="confirmCreateTasks"
       @confirm-and-stay="confirmCreateTasksAndStay"
+      @confirm-all-missing="confirmCreateAllMissingTasks"
     />
 
     <add-metadata-modal
@@ -283,6 +285,7 @@ export default {
         addThumbnails: false,
         creatingTasks: false,
         creatingTasksStay: false,
+        creatingAllTasks: false,
         del: false,
         deleteAllTasks: false,
         deleteMetadata: false,

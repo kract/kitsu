@@ -11,7 +11,7 @@ import {
 } from '@/lib/time'
 
 const csv = {
-  generateTimesheet(
+  generateTimesheet({
     name,
     timesheet,
     people,
@@ -23,7 +23,7 @@ const csv = {
     year,
     month,
     week
-  ) {
+  }) {
     const headers = csv.getTimesheetHeaders(
       timesheet,
       detailLevel,
@@ -192,9 +192,33 @@ const csv = {
     return stringHelpers.slugify(nameData.join('_'))
   },
 
+  /*
+   * Return the display names of the parsed CSV lines that don't match any
+   * existing entity in the given lookup (those lines will be created by the
+   * import instead of updating an existing entity). `indexMatchers` lists
+   * the column indexes used to build the lookup keys.
+   */
+  getNewEntityNames(parsedCsv, indexMatchers, database) {
+    const names = new Map()
+    parsedCsv
+      .slice(1)
+      .filter(line => line.length > 1)
+      .forEach(line => {
+        const values = indexMatchers.map(index => line[index] || '')
+        const key = values.join('')
+        if (key.length > 0 && !database[key] && !names.has(key)) {
+          names.set(key, values.filter(value => value.length > 0).join(' / '))
+        }
+      })
+    return [...names.values()]
+  },
+
   turnEntriesToCsvString(entries, config = {}) {
     return Papa.unparse(entries, {
       delimiter: ';',
+      // Neutralize spreadsheet formula injection: cells starting with
+      // = + - @ are prefixed with ' so Excel/Sheets treat them as text.
+      escapeFormulae: true,
       newline: '\n',
       quotes: true,
       skipEmptyLines: true,

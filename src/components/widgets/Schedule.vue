@@ -29,7 +29,7 @@
             </button>
           </div>
           <span class="total-value" v-if="!hideManDays">
-            {{ formatDuration(totalManDays) }} {{ $t('schedule.md') }}
+            {{ formatDuration(totalManDays) }} {{ durationUnit }}
           </span>
         </div>
 
@@ -58,7 +58,11 @@
                   color: isDarkTheme ? '#EEE' : '#999',
                   'margin-top': '4px'
                 }"
+                role="button"
+                tabindex="0"
                 @click="expandRootElement(rootElement)"
+                @keydown.enter.prevent="expandRootElement(rootElement)"
+                @keydown.space.prevent="expandRootElement(rootElement)"
               >
                 <chevron-right-icon v-if="!rootElement.expanded" />
                 <chevron-down-icon v-else />
@@ -128,7 +132,7 @@
                   !rootElement.avatar && rootElement.editable && !hideManDays
                 "
               >
-                {{ $t('schedule.md') }}
+                {{ durationUnit }}
               </span>
               <span
                 class="man-days-unit flexrow-item"
@@ -137,7 +141,7 @@
                 "
               >
                 {{ formatDuration(rootElement.man_days) }}
-                {{ $t('schedule.md') }}
+                {{ durationUnit }}
               </span>
             </div>
 
@@ -229,11 +233,11 @@
                         "
                         :value="formatDuration(childElement.man_days, false)"
                       />
-                      {{ $t('schedule.md') }}
+                      {{ durationUnit }}
                     </span>
                     <span class="man-days-unit flexrow-item" v-else>
                       {{ formatDuration(childElement.man_days) }}
-                      {{ $t('schedule.md') }}
+                      {{ durationUnit }}
                     </span>
                   </div>
                 </div>
@@ -265,7 +269,15 @@
           >
             <div
               class="milestone pointer"
+              role="button"
+              tabindex="0"
               @click="showEditMilestoneModal(day, currentMilestones[day.text])"
+              @keydown.enter.prevent="
+                showEditMilestoneModal(day, currentMilestones[day.text])
+              "
+              @keydown.space.prevent="
+                showEditMilestoneModal(day, currentMilestones[day.text])
+              "
               v-if="currentMilestones[day.text] && withMilestones"
             >
               <div class="milestone-tooltip">
@@ -305,7 +317,15 @@
               <div
                 class="add-milestone"
                 :title="addMilestoneTitle(day)"
+                role="button"
+                tabindex="0"
                 @click="
+                  showEditMilestoneModal(day, currentMilestones[day.text])
+                "
+                @keydown.enter.prevent="
+                  showEditMilestoneModal(day, currentMilestones[day.text])
+                "
+                @keydown.space.prevent="
                   showEditMilestoneModal(day, currentMilestones[day.text])
                 "
                 v-if="withMilestones && isCurrentUserManager"
@@ -433,13 +453,18 @@
                   :class="{
                     thinner: multiline
                   }"
-                  :title="`${rootElement.name} (${rootElement.startDate?.format('YYYY-MM-DD')} - ${rootElement.endDate?.format('YYYY-MM-DD')})`"
+                  :title="`${rootElement.name} (${displayDate(rootElement.startDate)} - ${displayDate(rootElement.endDate)})`"
                   :style="timebarStyle(rootElement, true)"
                 >
                   <div
                     class="timebar"
                     v-show="isVisible(rootElement)"
+                    role="button"
+                    tabindex="0"
                     @click="$emit('root-element-selected', rootElement)"
+                    @keydown.enter.prevent="
+                      $emit('root-element-selected', rootElement)
+                    "
                     v-if="rootElement.editable"
                   >
                     <div
@@ -555,7 +580,7 @@
                           withEstimations
                         )
                       "
-                      :title="`${formatDuration(timesheet.duration)} ${isDurationInHours ? $tc('main.hours_spent', formatDuration(timesheet.duration, false)) : $tc('main.days_spent', formatDuration(timesheet.duration, false))}`"
+                      :title="`${formatDuration(timesheet.duration)} ${isDurationInHours ? $t('main.hours_spent', formatDuration(timesheet.duration, false)) : $t('main.days_spent', formatDuration(timesheet.duration, false))}`"
                       :key="timesheet.id"
                       v-for="timesheet in rootElement.timesheet.filter(
                         ({ task_id }) => task_id === childElement.id
@@ -565,7 +590,7 @@
 
                   <div
                     class="timebar timebar-ghost timebar-ghost-before"
-                    :title="`${childElement.previousElement.name} (${childElement.previousElement.startDate.format('YYYY-MM-DD')} - ${childElement.previousElement.endDate.format('YYYY-MM-DD')})`"
+                    :title="`${childElement.previousElement.name} (${displayDate(childElement.previousElement.startDate)} - ${displayDate(childElement.previousElement.endDate)})`"
                     :class="{
                       'with-timesheets': withTimesheets
                     }"
@@ -582,7 +607,7 @@
 
                   <div
                     class="timebar timebar-ghost timebar-ghost-after"
-                    :title="`${childElement.nextElement.name} (${childElement.nextElement.startDate.format('YYYY-MM-DD')} - ${childElement.nextElement.endDate.format('YYYY-MM-DD')})`"
+                    :title="`${childElement.nextElement.name} (${displayDate(childElement.nextElement.startDate)} - ${displayDate(childElement.nextElement.endDate)})`"
                     :class="{
                       'with-timesheets': withTimesheets
                     }"
@@ -605,7 +630,7 @@
                       'with-timesheets': withTimesheets,
                       invalid: isOverlapping(childElement)
                     }"
-                    :title="`${multiline && childElement.project_name ? `${childElement.project_name} - ` : ''}${childElement.name} (${childElement.startDate.format('YYYY-MM-DD')} - ${childElement.endDate.format('YYYY-MM-DD')})`"
+                    :title="`${multiline && childElement.project_name ? `${childElement.project_name} - ` : ''}${childElement.name} (${displayDate(childElement.startDate)} - ${displayDate(childElement.endDate)})`"
                     :style="
                       timebarChildStyle(
                         childElement,
@@ -616,7 +641,12 @@
                       )
                     "
                     v-show="subchildren || isVisible(childElement)"
+                    role="button"
+                    tabindex="0"
                     @click="$emit('item-selected', rootElement, childElement)"
+                    @keydown.enter.prevent="
+                      $emit('item-selected', rootElement, childElement)
+                    "
                     v-if="withEstimations"
                   >
                     <div
@@ -710,9 +740,20 @@
                         ></div>
                         <div
                           class="timebar-center ellipsis"
+                          role="button"
+                          tabindex="0"
                           @mousedown="moveTimebar(task, $event)"
                           @touchstart="moveTimebar(task, $event)"
                           @click="
+                            $emit(
+                              'task-selected',
+                              rootElement,
+                              childElement,
+                              task,
+                              selection
+                            )
+                          "
+                          @keydown.enter.prevent="
                             $emit(
                               'task-selected',
                               rootElement,
@@ -790,6 +831,7 @@ import colors from '@/lib/colors'
 import {
   addBusinessDays,
   daysToMinutes,
+  formatDisplayDate,
   formatFullDate,
   getBusinessDays,
   getDayOffRange,
@@ -807,6 +849,10 @@ const store = useStore()
 const { t } = useI18n()
 
 const props = defineProps({
+  clipChildren: {
+    type: Boolean,
+    default: false
+  },
   daysOff: {
     type: Array,
     default: () => []
@@ -935,7 +981,10 @@ const timelinePositionRef = ref(null)
 
 // Store getters
 const currentProduction = computed(() => store.getters.currentProduction)
+const dateFormat = computed(() => store.getters.dateFormat)
 const departmentMap = computed(() => store.getters.departmentMap)
+
+const displayDate = date => formatDisplayDate(date, dateFormat.value)
 const isCurrentUserManager = computed(() => store.getters.isCurrentUserManager)
 const isDarkTheme = computed(() => store.getters.isDarkTheme)
 const milestones = computed(() => store.getters.milestones)
@@ -948,6 +997,10 @@ const taskStatuses = computed(() => store.getters.taskStatuses)
 const isDurationInHours = computed(() => {
   return organisation.value.format_duration_in_hours
 })
+
+const durationUnit = computed(() =>
+  isDurationInHours.value ? t('schedule.hours') : t('schedule.md')
+)
 
 const formatDuration = (minutes, toLocale = true) => {
   if (!minutes) {
@@ -1492,6 +1545,9 @@ const changeDates = event => {
           item.startDate = item.startDate.clone().add(dateDiffVal)
           item.endDate = item.endDate.clone().add(dateDiffVal)
         })
+        selection.value.forEach(item => {
+          propagateClipToChildren(item)
+        })
         if (props.multiline || props.subchildren) {
           const parentElements = [
             ...new Set(selection.value.map(item => item.parentElement))
@@ -1546,6 +1602,7 @@ const changeStartDate = event => {
   ) {
     currentElement.value.startDate = newStartDate.clone()
     updateItemEstimation(currentElement.value)
+    propagateClipToChildren(currentElement.value)
     refreshItemPositions(currentElement.value.parentElement)
     resetSelection([currentElement.value])
   }
@@ -1600,9 +1657,62 @@ const changeEndDate = event => {
   ) {
     currentElement.value.endDate = newEndDate.clone()
     updateItemEstimation(currentElement.value)
+    propagateClipToChildren(currentElement.value)
     refreshItemPositions(currentElement.value.parentElement)
     resetSelection([currentElement.value])
   }
+}
+
+// Origin dates (and estimation) are stamped at drag start so the clip can
+// restore-then-apply on every tick without drift and a cancelled move can
+// restore the exact pre-drag state. Only consumers that opt in through the
+// clipChildren prop get the stamping and the propagation: other schedules
+// (e.g. MainSchedule) do not persist child moves, so clipping there would
+// silently revert on reload.
+const stampDragOrigin = timeElement => {
+  if (!props.clipChildren) return
+  timeElement._dragOrigStartDate = timeElement.startDate.clone()
+  timeElement._dragOrigEndDate = timeElement.endDate.clone()
+  timeElement._dragOrigEstimation = timeElement.estimation
+  if (!timeElement.parentElement && Array.isArray(timeElement.children)) {
+    timeElement.children.forEach(child => {
+      child._dragOrigStartDate = child.startDate.clone()
+      child._dragOrigEndDate = child.endDate.clone()
+    })
+  }
+}
+
+const propagateClipToChildren = item => {
+  if (!props.clipChildren) return
+  if (item.parentElement || !Array.isArray(item.children)) return
+  const newStart = item.startDate
+  const newEnd = item.endDate
+  item.children.forEach(child => {
+    const origStart = child._dragOrigStartDate
+    const origEnd = child._dragOrigEndDate
+    if (!origStart || !origEnd) return
+
+    // restore from orig before applying clip to prevent drift on back-drag
+    child.startDate = origStart.clone()
+    child.endDate = origEnd.clone()
+
+    if (origEnd.isSameOrBefore(newStart)) {
+      // entirely before new start: snap to 1-day bar at start
+      child.startDate = newStart.clone()
+      child.endDate = newStart.clone().add(1, 'days')
+    } else if (origStart.isBefore(newStart)) {
+      // overlaps start: clip start
+      child.startDate = newStart.clone()
+    } else if (origStart.isSameOrAfter(newEnd)) {
+      // entirely after new end: snap to 1-day bar at end
+      child.startDate = newEnd.clone().subtract(1, 'days')
+      child.endDate = newEnd.clone()
+    } else if (origEnd.isAfter(newEnd)) {
+      // overlaps end: clip end
+      child.endDate = newEnd.clone()
+    }
+    // else: child fully inside new bounds — already restored, leave untouched
+  })
 }
 
 const updateItemEstimation = item => {
@@ -1673,6 +1783,7 @@ const moveTimebar = (timeElement, event) => {
     initialClientX = getClientX(event)
     document.body.style.cursor = props.reassignable ? 'all-scroll' : 'ew-resize'
 
+    stampDragOrigin(timeElement)
     updateSelection(timeElement, event)
   }
 }
@@ -1692,6 +1803,7 @@ const moveTimebarLeftSide = (timeElement, event) => {
     initialClientX = getClientX(event)
     document.body.style.cursor = 'w-resize'
 
+    stampDragOrigin(timeElement)
     updateSelection(timeElement, event)
   }
 }
@@ -1715,6 +1827,7 @@ const moveTimebarRightSide = (timeElement, event) => {
     initialClientX = getClientX(event)
     document.body.style.cursor = 'e-resize'
 
+    stampDragOrigin(timeElement)
     updateSelection(timeElement, event)
   }
 }
@@ -2017,7 +2130,7 @@ const timebarSubchildTitle = task => {
   const duration = isRealSchedule.value
     ? formatDuration(task.duration)
     : formatDuration(task.estimation)
-  return `${name} (${startDate} - ${endDate}) ${duration} ${t('schedule.md')}`
+  return `${name} (${startDate} - ${endDate}) ${duration} ${durationUnit.value}`
 }
 
 const getTimebarLeft = timeElement => {
@@ -2332,15 +2445,17 @@ onMounted(() => {
     ['mouseup', stopBrowsing],
     ['mouseleave', stopBrowsing],
     ['touchend', stopBrowsing],
-    ['touchcancel', stopBrowsing],
-    ['resize', resetScheduleSize]
+    ['touchcancel', stopBrowsing]
   ]
   resetScheduleSize()
   addEvents(domEvents)
+  // `resize` only fires on window, never on document.
+  window.addEventListener('resize', resetScheduleSize)
 })
 
 onBeforeUnmount(() => {
   removeEvents(domEvents)
+  window.removeEventListener('resize', resetScheduleSize)
   document.body.style.cursor = 'default'
 })
 

@@ -16,7 +16,11 @@
           :class="{
             active: mode === 'status'
           }"
+          role="button"
+          tabindex="0"
           @click="mode = 'status'"
+          @keydown.enter.prevent="mode = 'status'"
+          @keydown.space.prevent="mode = 'status'"
         >
           {{ $t('tasks.change_status') }}
         </span>
@@ -25,7 +29,11 @@
           :class="{
             active: mode === 'publish'
           }"
+          role="button"
+          tabindex="0"
           @click="mode = 'publish'"
+          @keydown.enter.prevent="mode = 'publish'"
+          @keydown.space.prevent="mode = 'publish'"
           v-if="!isConcept"
         >
           {{ $t('tasks.publish_revision') }}
@@ -131,13 +139,18 @@
         />
         <span
           class="flexrow-item column preview-delete-link"
+          role="button"
+          tabindex="0"
           @click.prevent="toggleLinkField(true)"
+          @keydown.enter.prevent="toggleLinkField(true)"
+          @keydown.space.prevent="toggleLinkField(true)"
         >
           x
         </span>
       </div>
       <div class="post-area">
         <checklist
+          class="checklist"
           :checklist="checklistItems"
           :frame="frame + 1"
           :revision="revision"
@@ -159,7 +172,15 @@
           >
             <div class="m0">
               {{ shortenText(preview.get('file').name, 40) }}
-              <span @click="$emit('remove-preview', preview)">x</span>
+              <span
+                role="button"
+                tabindex="0"
+                @click="$emit('remove-preview', preview)"
+                @keydown.enter.prevent="$emit('remove-preview', preview)"
+                @keydown.space.prevent="$emit('remove-preview', preview)"
+              >
+                x
+              </span>
             </div>
             <div class="progress-wrapper">
               <div
@@ -199,7 +220,11 @@
             <span
               class="flexrow-item column preview-delete-revision"
               :title="$t('tasks.auto_revision')"
+              role="button"
+              tabindex="0"
               @click.prevent="nextRevision = undefined"
+              @keydown.enter.prevent="nextRevision = undefined"
+              @keydown.space.prevent="nextRevision = undefined"
             >
               x
             </span>
@@ -219,13 +244,28 @@
             v-if="isImageAttachment(attach)"
           >
             <img :src="attachmentURL(attach)" :alt="attach.get('file').name" />
-            <span class="attachment-remove" @click="removeAttachment(attach)">
+            <span
+              class="attachment-remove"
+              role="button"
+              tabindex="0"
+              @click="removeAttachment(attach)"
+              @keydown.enter.prevent="removeAttachment(attach)"
+              @keydown.space.prevent="removeAttachment(attach)"
+            >
               x
             </span>
           </div>
           <div class="attachment-file" :title="attach.get('file').name" v-else>
             {{ shortenText(attach.get('file').name, 70) }}
-            <span @click="removeAttachment(attach)">x</span>
+            <span
+              role="button"
+              tabindex="0"
+              @click="removeAttachment(attach)"
+              @keydown.enter.prevent="removeAttachment(attach)"
+              @keydown.space.prevent="removeAttachment(attach)"
+            >
+              x
+            </span>
           </div>
         </template>
 
@@ -393,10 +433,10 @@ import { EyeIcon, EyeOffIcon } from 'lucide-vue-next'
 
 import drafts from '@/lib/drafts'
 import { remove } from '@/lib/models'
-import { getDownloadAttachmentPath } from '@/lib/path'
 import { replaceTimeWithTimecode } from '@/lib/render'
 import preferences from '@/lib/preferences'
 import strings from '@/lib/string'
+import filesApi from '@/store/api/files'
 
 import { useAtMentionsMembers } from '@/composables/atMentions'
 
@@ -850,20 +890,19 @@ const setValue = async comment => {
   checklistItems.value = JSON.parse(JSON.stringify(comment.checklist))
   text.value = comment.text
 
-  // duplicate attachment files
-  attachments.value = (
-    await Promise.all(
-      comment.attachment_files.map(async attachment => {
-        const fileUrl = getDownloadAttachmentPath(attachment)
-        const response = await fetch(fileUrl)
-        if (!response.ok) return
-        const fileBlob = await response.blob()
-        const formData = new FormData()
-        formData.append('file', fileBlob, attachment.name)
-        return formData
-      })
-    )
-  ).filter(Boolean)
+  // duplicate attachment files, one download at a time
+  const duplicatedAttachments = []
+  for (const attachment of comment.attachment_files) {
+    try {
+      const fileBlob = await filesApi.getAttachmentFileBlob(attachment)
+      const formData = new FormData()
+      formData.append('file', fileBlob, attachment.name)
+      duplicatedAttachments.push(formData)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+  attachments.value = duplicatedAttachments
 }
 
 const onAtTextChanged = input => {
@@ -1204,6 +1243,10 @@ article.add-comment {
 .post-area {
   position: relative;
   padding: 0 0.5em 0.2em 0.5em;
+}
+
+.checklist {
+  margin-top: 0.5em;
 }
 
 .progress-wrapper {

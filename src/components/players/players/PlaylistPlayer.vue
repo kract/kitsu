@@ -135,6 +135,7 @@
           :is-hd="isHd"
           :is-repeating="isRepeating"
           :muted="true"
+          :next-handle-in="nextEntityHandleIn"
           :panzoom="true"
           :handle-in="
             ['shot', 'edit', 'episode'].includes(playlist.for_entity)
@@ -254,10 +255,13 @@
           }"
           :entities="entityList"
           :full-screen="fullScreen"
+          :handle-in="handleIn"
+          :handle-out="handleOut"
           :is-hd="isHd"
           :is-repeating="isRepeating"
           :current-preview-index="currentPreviewIndex"
           :muted="isMuted"
+          :next-handle-in="nextEntityHandleIn"
           :panzoom="true"
           @entity-change="onPlayerPlayingEntityChange"
           @frame-update="onRawPlayerFrameUpdate"
@@ -290,6 +294,7 @@
         <sound-viewer
           ref="sound-player"
           class="sound-player"
+          :file-name="currentPreviewFileName"
           :preview-url="currentPreviewDlPath"
           :full-screen="fullScreen"
           @play-ended="pause"
@@ -433,6 +438,7 @@
       :comparison-annotations="comparisonAnnotations"
       :empty="!isCurrentPreviewMovie"
       :frame-duration="frameDuration"
+      :frame-start="frameStart"
       :is-full-mode="isFullMode"
       :is-full-screen="fullScreen || isEntitiesHidden"
       :movie-dimensions="movieDimensions"
@@ -443,8 +449,16 @@
             ? currentEntity.preview_nb_frames
             : Math.round(2 * fps)
       "
-      :handle-in="playlist.for_entity === 'shot' ? handleIn : -1"
-      :handle-out="playlist.for_entity === 'shot' ? handleOut : -1"
+      :handle-in="
+        playlist.for_entity === 'shot' && currentPreviewIndex === 0
+          ? handleIn
+          : -1
+      "
+      :handle-out="
+        playlist.for_entity === 'shot' && currentPreviewIndex === 0
+          ? handleOut
+          : -1
+      "
       :preview-id="currentPreview ? currentPreview.id : ''"
       @start-scrub="onScrubStart"
       @end-scrub="onScrubEnd"
@@ -504,6 +518,7 @@
         :compact="isFullMode"
         :current-frame-label="currentFrame"
         :current-time="currentTime"
+        :frame-start="frameStart"
         :full-screen="fullScreen"
         :is-3-d-animation="objectModel.isAnimation"
         :is-3-d-model="isCurrentPreviewModel"
@@ -627,7 +642,11 @@
       <span class="filler"></span>
 
       <template
-        v-if="(isCurrentUserManager || isCurrentUserSupervisor) && tempMode"
+        v-if="
+          (isCurrentUserManager || isCurrentUserSupervisor) &&
+          tempMode &&
+          canSave
+        "
       >
         <div class="separator"></div>
         <button-simple
@@ -657,7 +676,7 @@
         :pencil-palette="pencilPalette"
         :pencil-width="pencilWidth"
         :production-backgrounds="productionBackgrounds"
-        :read-only="isCurrentUserArtist"
+        :read-only="readOnly"
         :show-comments-button="true"
         :text-color="textColor"
         v-model:current-background="currentBackground"
@@ -900,7 +919,6 @@
  * This modules manages all the options available while playing a playlist.
  * It is made to work with a single playlist.
  */
-import { PSBrush } from 'fabricjs-psbrush'
 import { ArrowUpRightIcon, DownloadIcon, PlayIcon } from 'lucide-vue-next'
 import moment from 'moment-timezone'
 import { v4 as uuidv4 } from 'uuid'
@@ -923,29 +941,29 @@ import { useFullScreen } from '@/composables/fullScreen'
 import { useAnnotation } from '@/composables/players/annotation'
 import { useAnnotationBroadcast } from '@/composables/players/annotationBroadcast'
 import { useAnnotationCursor } from '@/composables/players/annotationCursor'
+import { useMediaKind } from '@/composables/players/mediaKind'
 import { useOnionSkin } from '@/composables/players/onionSkin'
 import { usePlaylistComparison } from '@/composables/players/playlistComparison'
 import { usePreviewShortcuts } from '@/composables/players/previewShortcuts'
+import { usePlayerTransport } from '@/composables/players/transport'
 import { usePreviewRoom } from '@/composables/previewRoom'
+import { isValidRoomId } from '@/lib/players/events'
 import { scrubFrame } from '@/lib/players/scrub'
 import preferences from '@/lib/preferences'
 import {
   buildAnnotationSnapshotFilename,
   buildAnnotationSnapshotTitle,
   drawSnapshotTitle,
-  isDiffPreview,
-  isMarkdownPreview,
-  isModelPreview,
   isMoviePreview,
-  isPdfPreview,
-  isPicturePreview,
-  isSoundPreview
+  isPicturePreview
 } from '@/lib/preview'
+import { formatDisplayDate, formatTimeOfDay } from '@/lib/time'
 import {
   ceilToFrame,
   floorToFrame,
   formatFrame,
   formatTime,
+  getEntityFrameStart,
   roundToFrame
 } from '@/lib/video'
 
@@ -985,13 +1003,17 @@ const FRAME_DELAY = 100
 const RESIZE_DELAY = 300
 
 const store = useStore()
+const $socket = store.$socket
 const { t } = useI18n()
 const instance = getCurrentInstance()
-const $socket = instance.appContext.config.globalProperties.$socket
 
 // Props
 
 const props = defineProps({
+  canSave: {
+    type: Boolean,
+    default: true
+  },
   currentEntityType: {
     type: String,
     default: 'shot'
@@ -1097,7 +1119,8 @@ const framesSeenOfPicture = ref(1)
 const currentBackground = ref(null)
 const currentPreviewIndex = ref(0)
 const currentTime = ref('00:00.000')
-const currentTimeRaw = ref(0)
+const { currentTimeRaw, isHd, isMuted, isPlaying, isRepeating, speed, volume } =
+  usePlayerTransport()
 const handleIn = ref(0)
 const handleOut = ref(0)
 const hasActiveShareLinks = ref(false)
@@ -1109,12 +1132,8 @@ const isDrawing = ref(false)
 const isEntitiesHidden = ref(false)
 const isEnvironmentSkybox = ref(false)
 const isFullMode = ref(false)
-const isHd = ref(false)
 const isLaserModeOn = ref(false)
-const isMuted = ref(false)
 const isObjectBackground = ref(false)
-const isPlaying = ref(false)
-const isRepeating = ref(false)
 const isShowAnnotationsWhilePlaying = ref(false)
 const isTyping = ref(false)
 const isWaveformDisplayed = ref(false)
@@ -1139,8 +1158,6 @@ const room = ref({
   people: [],
   newComer: true
 })
-const speed = ref(3)
-const volume = ref(50)
 
 const modals = ref({
   delete: false,
@@ -1166,6 +1183,9 @@ const currentProduction = computed(() => store.getters.currentProduction)
 const editMap = computed(() => store.getters.editMap)
 const episodeMap = computed(() => store.getters.episodeMap)
 const isCurrentUserArtist = computed(() => store.getters.isCurrentUserArtist)
+// Same intent as PreviewPlayer's readOnly prop: artists may watch
+// playlists but must not annotate or save.
+const readOnly = computed(() => isCurrentUserArtist.value)
 const isCurrentUserClient = computed(() => store.getters.isCurrentUserClient)
 const isCurrentUserManager = computed(() => store.getters.isCurrentUserManager)
 const isCurrentUserSupervisor = computed(
@@ -1202,27 +1222,16 @@ const userId = computed(() => store.getters.user?.id)
 // Computed — file type helpers
 
 const extension = computed(() => currentPreview.value?.extension || '')
-const isCurrentPreviewMovie = computed(() => isMoviePreview(extension.value))
-const isCurrentPreviewPicture = computed(() =>
-  isPicturePreview(extension.value)
-)
-const isCurrentPreviewModel = computed(() => isModelPreview(extension.value))
-const isCurrentPreviewSound = computed(() => isSoundPreview(extension.value))
-const isCurrentPreviewPdf = computed(() => isPdfPreview(extension.value))
-const isCurrentPreviewMarkdown = computed(() =>
-  isMarkdownPreview(extension.value)
-)
-const isCurrentPreviewDiff = computed(() => isDiffPreview(extension.value))
-const isCurrentPreviewFile = computed(
-  () =>
-    !isCurrentPreviewMovie.value &&
-    !isCurrentPreviewPicture.value &&
-    !isCurrentPreviewSound.value &&
-    !isCurrentPreviewModel.value &&
-    !isCurrentPreviewPdf.value &&
-    !isCurrentPreviewMarkdown.value &&
-    !isCurrentPreviewDiff.value
-)
+const {
+  isDiff: isCurrentPreviewDiff,
+  isFile: isCurrentPreviewFile,
+  isMarkdown: isCurrentPreviewMarkdown,
+  isModel: isCurrentPreviewModel,
+  isMovie: isCurrentPreviewMovie,
+  isPdf: isCurrentPreviewPdf,
+  isPicture: isCurrentPreviewPicture,
+  isSound: isCurrentPreviewSound
+} = useMediaKind(extension)
 
 // Computed — entity & preview state
 
@@ -1264,6 +1273,19 @@ const currentPreview = computed(() => {
   return entity.preview_file_previews?.[currentPreviewIndex.value - 1]
 })
 
+// The main preview entity fields don't carry original_name: look it up in
+// the full preview_files payload so reviewers see which file is playing.
+const currentPreviewFileName = computed(() => {
+  const preview = currentPreview.value
+  if (!preview) return ''
+  const originalName =
+    preview.original_name ||
+    Object.values(currentEntity.value?.preview_files || {})
+      .flat()
+      .find(previewFile => previewFile.id === preview.id)?.original_name
+  return originalName ? `${originalName}.${preview.extension}` : ''
+})
+
 const currentEntityPreviewLength = computed(() => {
   const entity = currentEntity.value
   if (!entity || !entity.preview_file_previews) return 0
@@ -1281,6 +1303,12 @@ const nextEntityIndex = computed(() => {
   if (index > entityList.value.length - 1) index = 0
   return index
 })
+
+// Next entity's handle-in, so the viewers can park their preloaded decoder
+// past the slate before the players switch (#1019).
+const nextEntityHandleIn = computed(
+  () => getEntityHandles(entityList.value[nextEntityIndex.value]).handleIn
+)
 
 const picturePreviews = computed(() =>
   entityList.value.flatMap(e => [
@@ -1363,6 +1391,13 @@ const frameNumber = computed(() => {
   if (n >= nbFrames.value) n = nbFrames.value
   return Math.round(n) - 1
 })
+
+// Production start frame of the playing shot (data.frame_in, e.g. 1001).
+// Forwarded to the playback bar / progress bar as a display-only offset —
+// currentFrame stays 1-based since annotation seeks round-trip on it.
+const frameStart = computed(() =>
+  getEntityFrameStart(shotMap.value.get(currentEntity.value?.id))
+)
 
 const currentFrame = computed(() => formatFrame(frameNumber.value + 2))
 
@@ -1468,6 +1503,8 @@ const deleteText = computed(() => {
 })
 
 const timezone = computed(() => user.value?.timezone || moment.tz.guess())
+const dateFormat = computed(() => store.getters.dateFormat)
+const use12HourClock = computed(() => store.getters.use12HourClock)
 
 const entityTaskTypes = computed(() => {
   switch (props.playlist?.for_entity) {
@@ -1539,6 +1576,7 @@ const {
   currentComparisonPreviewLength,
   comparisonAnnotations,
   toggleComparison,
+  clampComparisonPreviewIndex,
   goToPreviousComparisonPicture,
   goToNextComparisonPicture
 } = usePlaylistComparison({
@@ -1581,7 +1619,8 @@ const annotation = useAnnotation({
   isLaserModeOn,
   postAnnotationAddition,
   postAnnotationDeletion,
-  postAnnotationUpdate
+  postAnnotationUpdate,
+  getAdditionalPreviews: () => getAdditionalPreviews()
 })
 
 annotation.setCurrentPreviewGetter(() => currentPreview.value)
@@ -1707,8 +1746,11 @@ const previewRoom = usePreviewRoom({
   onWindowResize: () => onWindowResize(),
   findEntity: info => findEntity(info),
   findEntityIndex: info => findEntityIndex(info),
+  // Remote version change: the entity still holds the previous preview
+  // file id locally. Silent so the receiver does not re-persist the
+  // change already saved by the sender.
   changePreviewFile: (entity, previewFile) =>
-    changePreviewFile(entity, previewFile),
+    changePreviewFile(entity, previewFile, entity.preview_file_id, true),
   setRawPlayerFrame: f => rawPlayer.value?.setCurrentFrame(f),
   setCurrentTimeRaw: t => setCurrentTimeRaw(t),
   exists: v => v !== null && v !== undefined,
@@ -1792,8 +1834,6 @@ const clearFocus = () => {
 }
 
 // Helpers
-
-const isValidRoomId = r => !!r?.id && r.id !== 'temp'
 
 const isDefaultBackground = background => {
   const defaultId = currentProduction.value?.default_preview_background_file_id
@@ -2154,6 +2194,24 @@ const playEntity = (entityIndex, updateFullPlaylist = true, frame = -1) => {
       }
     })
   } else {
+    // Keep the video decoder on the selected entity even when its main
+    // preview is not a movie: switching to a video sub-element of a
+    // multi-element revision reloads from the decoder's current index.
+    nextTick(() => {
+      rawPlayer.value?.loadEntity(entityIndex, 0, true)
+    })
+    // Unlike movies, pictures have no time-update channel driving the
+    // playlist playhead: jump it to the entity's slot here, even while
+    // playing. Strip clicks/drags pass updateFullPlaylist=false and keep
+    // their exact clicked position.
+    if (updateFullPlaylist && entity) {
+      if (isFullMode.value && !isPlaying.value) {
+        fullPlaylistPlayer.value.currentTime = entity.start_duration
+        playlistProgress.value = entity.start_duration
+      } else if (!isFullMode.value) {
+        playlistProgress.value = entity.start_duration
+      }
+    }
     const ann = getAnnotation(0)
     if (!isPlaying.value) loadAnnotation(ann)
     if (wasDrawing) {
@@ -2162,10 +2220,13 @@ const playEntity = (entityIndex, updateFullPlaylist = true, frame = -1) => {
         setAnnotationDrawingMode(true)
       }, 100)
     }
+    // Entities without any preview borrow the picture timer so continuous
+    // playback holds their slot and then moves on instead of stalling.
     if (
       isPlaying.value &&
       entity &&
-      isPicturePreview(entity.preview_file_extension)
+      (isPicturePreview(entity.preview_file_extension) ||
+        !entity.preview_file_id)
     ) {
       playPicture()
     }
@@ -2290,7 +2351,10 @@ const goPreviousDrawing = () => {
     clearCanvas()
     const previous = getPreviousAnnotationTime(currentTimeRaw.value)
     if (!previous) return
-    const annotationTime = Number(previous.frame) - 1
+    // Seek by the annotation's time, not its stored frame: .frame can be
+    // stale (off by one, or a zero-padded string) and lands on the wrong
+    // frame. See PreviewPlayer.jumpToAnnotationFrame.
+    const annotationTime = Math.round(previous.time / frameDuration.value)
     if (isFullMode.value) {
       setFullPlayerTime(annotationTime / fps.value)
     } else {
@@ -2308,7 +2372,8 @@ const goNextDrawing = () => {
     clearCanvas()
     const next = getNextAnnotationTime(currentTimeRaw.value)
     if (!next) return
-    const annotationTime = Number(next.frame) - 1
+    // Seek by time, not the stale .frame — see goPreviousDrawing.
+    const annotationTime = Math.round(next.time / frameDuration.value)
     if (isFullMode.value) {
       setFullPlayerTime(annotationTime / fps.value)
     } else {
@@ -2356,10 +2421,14 @@ const onProgressChanged = (frame, updatePlaylistProgress = true) => {
   }
   sendUpdatePlayingStatus()
   onFrameUpdate(frame)
-  if (isFullMode.value && updatePlaylistProgress) {
+  if (updatePlaylistProgress && currentEntity.value) {
     const start = currentEntity.value.start_duration
     const time = (frame - 1) / fps.value + start
-    fullPlaylistPlayer.value.currentTime = time
+    // Keep the playlist cursor in sync on scrub/seek in every mode, not only
+    // full mode; the concatenated player only exists in full mode.
+    if (isFullMode.value) {
+      fullPlaylistPlayer.value.currentTime = time
+    }
     playlistProgress.value = time
   }
 }
@@ -2594,15 +2663,22 @@ const onFrameUpdate = frame => {
   if (props.playlist && isPlaying.value) {
     const hasHandles =
       ['shot', 'edit', 'episode'].includes(props.playlist.for_entity) &&
+      currentPreviewIndex.value === 0 &&
       handleOut.value < nbFrames.value
+    // With rVFC the trim loop is enforced inside MultiVideoViewer at the
+    // paint decision; this detection only remains the fallback for the
+    // rAF pipeline and the entity-chaining (non-repeat) path.
     const reachedEnd = hasHandles
       ? frameNumber.value >= handleOut.value
       : frameNumber.value >= nbFrames.value - 1
     if (reachedEnd) {
       if (isRepeating.value) {
         const startFrame = hasHandles ? handleIn.value : 0
-        rawPlayer.value?.setCurrentFrame(startFrame)
-        rawPlayerComparison.value?.setCurrentFrame(startFrame)
+        // Raw frame-start seek: setCurrentFrame goes through
+        // runSetCurrentTime, whose re-entrancy gate can drop the loop
+        // seek and let the clip play through to its real end.
+        rawPlayer.value?.setCurrentTimeRaw(startFrame / fps.value)
+        rawPlayerComparison.value?.setCurrentTimeRaw(startFrame / fps.value)
       } else {
         onPlayNext()
       }
@@ -2900,6 +2976,39 @@ const prefetchAnnotationsAround = index => {
   }
 }
 
+// Store copies of the current preview kept under entity.preview_files (one
+// group per task type in the playlist payload). The annotation composable
+// hands them to the updatePreviewAnnotations action so its store write also
+// refreshes the revision copies — saveAnnotations no longer commits itself.
+const getAdditionalPreviews = () => {
+  if (readOnly.value) return []
+  const entity = entityList.value[playingEntityIndex.value]
+  if (!entity) return []
+
+  let previewId = entity.preview_file_id
+  if (currentPreviewIndex.value > 0) {
+    const index = currentPreviewIndex.value - 1
+    const previewFile = currentEntity.value?.preview_file_previews?.[index]
+    if (previewFile) previewId = previewFile.id
+  }
+
+  const taskId = entity.preview_file_task_id
+  const pairs = []
+  Object.keys(entity.preview_files || {}).forEach(taskTypeId => {
+    let revPreview = null
+    entity.preview_files[taskTypeId].forEach(p => {
+      if (p.id === previewId) revPreview = p
+      if (!revPreview && p.previews) {
+        p.previews.forEach(sub => {
+          if (sub.id === previewId) revPreview = p
+        })
+      }
+    })
+    if (revPreview) pairs.push({ taskId, preview: revPreview })
+  })
+  return pairs
+}
+
 const saveAnnotations = () => {
   let time = roundToFrame(currentTimeRaw.value, fps.value) || 0
   if (time < 0) time = 0
@@ -2929,30 +3038,12 @@ const saveAnnotations = () => {
     }
   }
 
-  if (!isCurrentUserArtist.value) {
+  if (!readOnly.value) {
     if (!notSaved.value) {
       startAnnotationSaving(preview, newAnnotations)
     }
 
     entity.preview_file_annotations = newAnnotations
-    Object.keys(entity.preview_files || {}).forEach(taskTypeId => {
-      let revPreview = null
-      entity.preview_files[taskTypeId].forEach(p => {
-        if (p.id === preview.id) revPreview = p
-        if (!revPreview && p.previews) {
-          p.previews.forEach(sub => {
-            if (sub.id === preview.id) revPreview = p
-          })
-        }
-      })
-      if (revPreview) {
-        store.commit('UPDATE_PREVIEW_ANNOTATION', {
-          taskId: preview.task_id,
-          preview: revPreview,
-          annotations: newAnnotations
-        })
-      }
-    })
   }
 }
 
@@ -3294,7 +3385,20 @@ const getFileFromCanvas = (canvas, filename) => {
 }
 
 const updateProgressBar = f => {
-  const frame = f !== undefined ? f : frameNumber.value
+  let frame = f !== undefined ? f : frameNumber.value
+  // While playing a trimmed main preview, never paint the fill past the
+  // handle-out marker: near the trim end the frame channel runs ahead of
+  // the painted frame and the +1 fill convention lands one frame beyond
+  // the marker on every loop. Paused stepping onto the excluded frame
+  // stays untouched.
+  if (
+    isPlaying.value &&
+    currentPreviewIndex.value === 0 &&
+    ['shot', 'edit', 'episode'].includes(props.playlist?.for_entity) &&
+    handleOut.value < nbFrames.value
+  ) {
+    frame = Math.min(frame, handleOut.value - 1)
+  }
   if (progress.value) progress.value.updateProgressBar(frame + 1)
   // The playlist playhead position is driven by the continuous time-update
   // channel (onRawPlayerTimeUpdate) so it stays smooth, not by the rounded
@@ -3380,7 +3484,10 @@ const continuePlayingPlaylist = (entityIndex, startMs) => {
     return
   }
   const previews = currentEntity.value?.preview_file_previews
-  if (previews && previews.length === currentPreviewIndex.value) {
+  // No previews at all (entity without preview): advance to the next
+  // entity, otherwise the else branch increments currentPreviewIndex
+  // forever and playback stalls on the empty entity.
+  if (!previews || previews.length === currentPreviewIndex.value) {
     nextTick(() => {
       onPlayNextEntity(true)
       framesSeenOfPicture.value = 1
@@ -3388,9 +3495,21 @@ const continuePlayingPlaylist = (entityIndex, startMs) => {
   } else {
     currentPreviewIndex.value++
     nextTick(() => {
-      playingPictureTimeout = setTimeout(() => {
-        continuePlayingPlaylist(playingEntityIndex.value, Date.now())
-      }, 100)
+      // A still-image sub-preview can be followed by a video sub-preview.
+      // Play the whole clip from its start instead of rescheduling the image
+      // loop (which would freeze it and then skip it). Sub-previews are not
+      // the entity's trimmed main preview, so ignore the entity handle-in/out.
+      if (isCurrentPreviewMovie.value) {
+        clearTimeout(playingPictureTimeout)
+        rawPlayer.value?.setCurrentFrame(0)
+        rawPlayer.value?.play()
+        if (isComparing.value) rawPlayerComparison.value?.play()
+        isPlaying.value = true
+      } else {
+        playingPictureTimeout = setTimeout(() => {
+          continuePlayingPlaylist(playingEntityIndex.value, Date.now())
+        }, 100)
+      }
     })
   }
 }
@@ -3429,7 +3548,12 @@ const onPreviewChanged = ({ entity, previewFile, previousPreviewFileId }) => {
   updateRoomStatus(previousPreviewFileId)
 }
 
-const changePreviewFile = (entity, previewFile, previousPreviewFileId) => {
+const changePreviewFile = (
+  entity,
+  previewFile,
+  previousPreviewFileId,
+  silent = false
+) => {
   pause()
   const localEntity = entityList.value.find(
     s => s.id === entity.id && s.preview_file_id === previousPreviewFileId
@@ -3451,11 +3575,13 @@ const changePreviewFile = (entity, previewFile, previousPreviewFileId) => {
       rawPlayer.value.reloadCurrentEntity()
     }
   }
-  emit('preview-changed', {
-    entity,
-    previewFileId: previewFile.id,
-    previousPreviewFileId
-  })
+  if (!silent) {
+    emit('preview-changed', {
+      entity,
+      previewFileId: previewFile.id,
+      previousPreviewFileId
+    })
+  }
   clearCanvas()
   resetPanZoom()
   panzoomTransform.value = { x: 0, y: 0, scale: 1 }
@@ -3680,7 +3806,7 @@ const getBuildPath = job =>
 
 const formatDate = creationDate => {
   const date = moment.tz(creationDate, 'UTC').tz(timezone.value)
-  return date.format('YYYY-MM-DD HH:mm')
+  return `${formatDisplayDate(date, dateFormat.value)} ${formatTimeOfDay(date, use12HourClock.value)}`
 }
 
 const setPlaylistProgress = time => {
@@ -3810,7 +3936,11 @@ const loadWaveForm = () => {
       }
     }
   } else {
-    if (wavesurfer) wavesurfer.destroy()
+    if (wavesurfer) {
+      wavesurfer.destroy()
+      // Null it so the playback seek sync cannot touch a destroyed instance.
+      wavesurfer = null
+    }
   }
 }
 
@@ -3835,6 +3965,14 @@ const getEntityHandles = entity => {
 
 const resetHandles = entity => {
   if (!['shot', 'edit', 'episode'].includes(props.playlist?.for_entity)) return
+  // No entity argument = reset for what is displayed right now. A
+  // sub-preview is not the entity's trimmed main preview, so the entity
+  // trim handles don't apply to its timeline.
+  if (!entity && currentPreviewIndex.value > 0) {
+    handleIn.value = 0
+    handleOut.value = nbFrames.value
+    return
+  }
   entity = entity || currentEntity.value
   const { handleIn: entityHandleIn, handleOut: entityHandleOut } =
     getEntityHandles(entity)
@@ -3846,13 +3984,26 @@ const resetPlaylistFrameData = () => {
   let playlistDur = 0
   let curFrame = 0
   entityList.value.forEach((entity, index) => {
+    // An entity without preview still spans its edit length (like a slug
+    // in a conform): playback holds the slot, the strip shows it in grey.
     const defaultNbFrames =
       entity.preview_nb_frames || 2 * fps.value * frameDuration.value
     framesPerImage.value[index] = defaultNbFrames
-    const n =
-      Math.round((entity.preview_file_duration || 0) * fps.value) ||
-      defaultNbFrames
+    // Duration only counts for movie mains: a picture revision holding a
+    // video sub-preview carries that video's duration, and using it here
+    // would stretch the entity's strip slot past the width PlaylistProgress
+    // computes from preview_nb_frames, leaving holes in the strip.
+    const n = isMoviePreview(entity.preview_file_extension)
+      ? Math.round((entity.preview_file_duration || 0) * fps.value) ||
+        defaultNbFrames
+      : defaultNbFrames
     entity.start_duration = (curFrame + 1) / fps.value
+    // Frozen frame accounting for PlaylistProgress: the strip renders from
+    // these two fields only, so it tiles by construction. Recomputing widths
+    // from live preview fields drifts from the positions frozen here (fps is
+    // the *current* entity's rate, durations refresh after this pass).
+    entity.playlist_start_frame = curFrame
+    entity.playlist_nb_frames = n
     for (let i = 0; i < n; i++) {
       playlistShotPosition.value[curFrame + i] = {
         index,
@@ -3979,20 +4130,13 @@ const resetPlaylist = () => {
 const onAnnotateClicked = () => {
   showCanvas()
   if (isDrawing.value) {
-    if (fabricCanvas.value) fabricCanvas.value.isDrawingMode = false
     isDrawing.value = false
   } else {
+    _resetColor()
+    _resetPencil()
     isShapeMode.value = false
     isTyping.value = false
     isEraserModeOn.value = false
-    if (fabricCanvas.value) {
-      fabricCanvas.value.isDrawingMode = true
-      const brush = new PSBrush(fabricCanvas.value)
-      fabricCanvas.value.freeDrawingBrush = brush
-      brush.pressureManager.fallback = 0.5
-    }
-    _resetColor()
-    _resetPencil()
     isDrawing.value = true
   }
 }
@@ -4212,6 +4356,7 @@ watch(isAnnotationsDisplayed, () => {
 })
 
 watch(isDrawing, () => {
+  setAnnotationDrawingMode(isDrawing.value)
   if (!isDrawing.value && isLaserModeOn.value) isLaserModeOn.value = false
   if (isDrawing.value && !isAnnotationsDisplayed.value) {
     isAnnotationsDisplayed.value = true
@@ -4260,6 +4405,16 @@ watch(currentPreviewIndex, () => {
       height: currentPreview.value.height
     }
   }
+})
+
+// Keep the compared sub-preview aligned with the main one; when the compared
+// revision has fewer sub-previews, stay on its last one.
+watch(currentPreviewIndex, () => {
+  if (!isComparing.value || currentComparisonPreviewLength.value <= 0) return
+  currentComparisonPreviewIndex.value = Math.min(
+    currentPreviewIndex.value,
+    currentComparisonPreviewLength.value - 1
+  )
 })
 
 watch(playingEntityIndex, () => {
@@ -4337,6 +4492,7 @@ watch(isComparing, () => {
 })
 
 watch(currentRevisionToCompare, () => {
+  clampComparisonPreviewIndex()
   if (isComparing.value && !isComparisonOverlay.value) {
     loadComparisonAnnotation(currentTimeRaw.value)
   }
@@ -4453,6 +4609,13 @@ watch(
       if (room.value?.people?.includes(user.value?.id)) leaveRoom()
       closeRoom(oldPlaylist.id)
     }
+    // Leave the previous playlist's build playback, otherwise its movie
+    // keeps playing over the newly selected playlist.
+    if (isFullMode.value) {
+      fullPlaylistPlayer.value?.pause()
+      isFullMode.value = false
+    }
+    fullPlayingPath = ''
     endAnnotationSaving()
     room.value.id = props.playlist?.id
     room.value.localId = uuidv4()
@@ -4581,7 +4744,7 @@ onMounted(() => {
 
   resetPencilConfiguration()
 
-  volume.value = preferences.getPreference('player:volume') || volume.value
+  volume.value = preferences.getIntPreference('player:volume', volume.value)
   nextTick(() => {
     rawPlayer.value?.setVolume(volume.value)
   })
@@ -4595,6 +4758,7 @@ onBeforeUnmount(() => {
   endAnnotationSaving()
   cancelProgressiveRender()
   _stopPlaylistProgressUpdateLoop()
+  if (playingPictureTimeout) clearTimeout(playingPictureTimeout)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('beforeunload', onWindowsClosed)
@@ -4611,7 +4775,10 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onFocusToggle, true)
   leaveRoom()
   $socket.off('preview-file:annotation-update', onPreviewFileAnnotationUpdate)
-  if (wavesurfer) wavesurfer.destroy()
+  if (wavesurfer) {
+    wavesurfer.destroy()
+    wavesurfer = null
+  }
 })
 
 // Public API for the parent's `$refs['playlist-player']` and for the

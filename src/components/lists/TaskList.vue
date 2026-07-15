@@ -93,7 +93,10 @@
               'datatable-row': true,
               selected: selectionGrid[task.id]
             }"
+            role="button"
+            tabindex="0"
             @click="selectTask($event, index, task)"
+            @keydown.enter.prevent="selectTask($event, index, task)"
             v-for="(task, index) in tasks"
           >
             <td class="thumbnail flexrow">
@@ -225,7 +228,7 @@
                 v-if="isInDepartment(task) && selectionGrid[task.id]"
               />
               <template v-else>
-                {{ formatDate(task.start_date) }}
+                {{ formatDisplayDate(task.start_date) }}
               </template>
             </td>
             <td class="due-date" v-if="!withSchedule">
@@ -238,20 +241,20 @@
                 v-if="isInDepartment(task) && selectionGrid[task.id]"
               />
               <template v-else>
-                {{ formatDate(task.due_date) }}
+                {{ formatDisplayDate(task.due_date) }}
               </template>
             </td>
             <td class="real-start-date" v-if="!withSchedule">
-              {{ formatDate(task.real_start_date) }}
+              {{ formatDisplayDate(task.real_start_date) }}
             </td>
             <td class="real-end-date" v-if="!withSchedule">
-              {{ formatDate(task.end_date) }}
+              {{ formatDisplayDate(task.end_date) }}
             </td>
             <td class="done-date" v-if="!withSchedule">
-              {{ formatDate(task.done_date) }}
+              {{ formatDisplayDate(task.done_date) }}
             </td>
             <td class="last-comment-date" v-if="!withSchedule">
-              {{ formatDate(task.last_comment_date) }}
+              {{ formatDisplayDate(task.last_comment_date) }}
             </td>
             <td v-if="!withSchedule"></td>
           </tr>
@@ -279,7 +282,10 @@
               selected: selectionGrid[task.id]
             }"
             :key="task.id"
+            role="button"
+            tabindex="0"
             @click="selectTask($event, index, task)"
+            @keydown.enter.prevent="selectTask($event, index, task)"
             v-for="(task, index) in taskGroup.tasks"
           >
             <entity-preview
@@ -320,7 +326,10 @@
           selected: selectionGrid[task.id]
         }"
         :key="task.id"
+        role="button"
+        tabindex="0"
         @click="selectTask($event, index, task)"
+        @keydown.enter.prevent="selectTask($event, index, task)"
         v-for="(task, index) in displayedTasks"
       >
         <entity-preview
@@ -585,7 +594,7 @@ export default {
       'addSelectedTasks',
       'clearSelectedTasks',
       'updateTask',
-      'unassignPersonFromTask',
+      'unassignPersonFromTasks',
       'removeSelectedTask'
     ]),
 
@@ -624,12 +633,11 @@ export default {
     },
 
     onUnassign(task, person) {
-      if (this.selectedTasks.size > 0) {
-        this.selectedTasks.forEach(t => {
-          this.unassignPersonFromTask({ task: t, person })
-        })
+      const tasks = Array.from(this.selectedTasks.values())
+      if (!this.selectedTasks.has(task.id)) {
+        tasks.push(task)
       }
-      this.unassignPersonFromTask({ task, person })
+      this.unassignPersonFromTasks({ tasks, person })
     },
 
     updateStartDate(date) {

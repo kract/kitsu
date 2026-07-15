@@ -111,7 +111,7 @@
       v-if="isEmptyList && !isCurrentUserClient && !isLoading"
     >
       <p class="info">
-        <img src="../../assets/illustrations/empty_asset.png" />
+        <img src="../../assets/illustrations/empty_asset.png" alt="" />
       </p>
       <p class="info">{{ $t('assets.empty_list') }}</p>
     </div>
@@ -120,7 +120,7 @@
       v-if="isEmptyList && isCurrentUserClient && !isLoading"
     >
       <p class="info">
-        <img src="../../assets/illustrations/empty_asset.png" />
+        <img src="../../assets/illustrations/empty_asset.png" alt="" />
       </p>
       <p class="info">{{ $t('assets.empty_list_client') }}</p>
     </div>
@@ -130,7 +130,7 @@
       v-if="!isEmptyList && !isLoading"
     >
       {{ displayedAssetTypesLength }}
-      {{ $tc('asset_types.number', displayedAssetTypesLength) }}
+      {{ $t('asset_types.number', displayedAssetTypesLength) }}
     </p>
   </div>
 </template>

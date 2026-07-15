@@ -8,11 +8,10 @@ import {
 const UNION_REGEX = /\+\(.*\)/
 const EQUAL_REGEX =
   /\[([^[]*)\]=\[([^[]*)\]|([^ ]*)=\[([^[]*)\]|([^ ]*)=([^ ]*)|\[([^[]*)\]=([^ ]*)/g
-const EQUAL_ASSET_TYPE_REGEX = /type=\[([^[]*)\]|type=([^ ]*)|type=([^ ]*)/g
+const EQUAL_ASSET_TYPE_REGEX = /type=\[([^[]*)\]|type=([^ ]*)/g
 const EQUAL_PEOPLE_DEPARTMENT_REGEX =
-  /department=\[([^[]*)\]|department=([^ ]*)|department=([^ ]*)/g
-const EQUAL_READY_FOR_REGEX =
-  /readyfor=\[([^[]*)\]|readyfor=([^ ]*)|readyfor=([^ ]*)/g
+  /department=\[([^[]*)\]|department=([^ ]*)/g
+const EQUAL_READY_FOR_REGEX = /readyfor=\[([^[]*)\]|readyfor=([^ ]*)/g
 const EQUAL_PRIORITY_REGEX = /priority-\[([^[]*)\]=\d|priority-([^ ]*)=\d/g
 const EQUAL_ASSETS_READY_REGEX =
   /assetsready=\[([^[]*)\]|assetsready=([^ ]*)|assetsready=([^ ]*)/g
@@ -24,22 +23,20 @@ const EQUAL_ASSIGNATION_REGEX = /assignedto\[([^[]*)\]=\[([^[]*)\]/g
  * Then apply filters found on result list.
  */
 export const applyFilters = (entries, filters, taskMap) => {
-  if (filters && filters.length > 0) {
-    const result = entries.filter(entry => {
-      let isOk = null
-      for (let i = 0; i < filters.length; i++) {
-        const filter = filters[i]
-        if (isOk === false && !filters.union) break
-        if (isOk === true && filters.union) break
-        isOk =
-          applyFiltersFunctions[filter.type](entry, filter, taskMap) || false
-      }
-      return isOk
-    })
-    return result
-  } else {
-    return entries
-  }
+  if (!filters || filters.length === 0) return entries
+
+  const matchesFilter = (entry, filter) =>
+    applyFiltersFunctions[filter.type](entry, filter, taskMap) || false
+
+  // filters.union switches the combinator: OR (some) when set by a +(...)
+  // query group, AND (every) otherwise.
+  return filters.union
+    ? entries.filter(entry =>
+        filters.some(filter => matchesFilter(entry, filter))
+      )
+    : entries.filter(entry =>
+        filters.every(filter => matchesFilter(entry, filter))
+      )
 }
 
 /*
@@ -587,22 +584,17 @@ export const getDepartmentFilters = (departments, queryText) => {
 export const getAssignedToFilters = (persons, taskTypes, queryText) => {
   if (!queryText) return []
 
-  // create a deep copy of persons with slugified names to avoid reference issues
-  const shallowPersons = persons.map(person => ({
-    ...JSON.parse(JSON.stringify(person)),
-    name: hashName(person.name)
-  }))
-
   const results = []
   const rgxMatches = queryText.match(EQUAL_ASSIGNATION_REGEX)
   if (rgxMatches) {
     const taskTypeNameIndex = buildTaskTypeIndex(taskTypes)
     const personIndex = {}
-    shallowPersons.forEach(person => {
-      if (!personIndex[person.name]) {
-        personIndex[person.name] = []
+    persons.forEach(person => {
+      const name = hashName(person.name)
+      if (!personIndex[name]) {
+        personIndex[name] = []
       }
-      personIndex[person.name].push(person.id)
+      personIndex[name].push(person.id)
     })
 
     rgxMatches.forEach(rgxMatch => {

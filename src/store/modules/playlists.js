@@ -202,6 +202,15 @@ const actions = {
     return playlist
   },
 
+  async addEntitiesToPlaylist({ commit }, { playlist, entityIds }) {
+    const updatedPlaylist = await playlistsApi.addEntitiesToPlaylist(
+      playlist,
+      entityIds
+    )
+    commit(EDIT_PLAYLIST_END, updatedPlaylist)
+    return updatedPlaylist
+  },
+
   async pushEntityToPlaylist(
     { commit, dispatch },
     { playlist, entity, previewFiles, task, entityMap }
@@ -328,6 +337,22 @@ const actions = {
 
   saveSharedPlaylistAnnotations(_, { shareToken, data }) {
     return playlistsApi.saveSharedPlaylistAnnotations(shareToken, data)
+  },
+
+  loadPlaylistShareLinks(_, playlistId) {
+    return playlistsApi.getShareLinks(playlistId)
+  },
+
+  createPlaylistShareLink(_, { playlistId, data }) {
+    return playlistsApi.createShareLink(playlistId, data)
+  },
+
+  revokePlaylistShareLink(_, { playlistId, token }) {
+    return playlistsApi.revokeShareLink(playlistId, token)
+  },
+
+  sendPlaylistShareInvitations(_, { playlistId, token, data }) {
+    return playlistsApi.sendShareInvitations(playlistId, token, data)
   }
 }
 

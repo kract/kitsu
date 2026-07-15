@@ -73,7 +73,13 @@
 
           <template v-for="entry in entries" :key="entry.id">
             <tr class="datatable-row">
-              <td class="expander" @click="toggleExpanded(entry.id)">
+              <td
+                class="expander"
+                role="button"
+                tabindex="0"
+                @click="toggleExpanded(entry.id)"
+                @keydown.enter.prevent="toggleExpanded(entry.id)"
+              >
                 <chevron-right-icon
                   v-if="isRetakes && expanded[entry.id] !== true"
                 />
@@ -193,7 +199,7 @@
       v-if="!isLoading && isEmptyList && !isCurrentUserClient"
     >
       <p class="info">
-        <img src="../../assets/illustrations/empty_shot.png" />
+        <img src="../../assets/illustrations/empty_shot.png" alt="" />
       </p>
       <p class="info">{{ $t('episodes.empty_list') }}</p>
     </div>
@@ -202,14 +208,14 @@
       v-if="!isLoading && isEmptyList && isCurrentUserClient"
     >
       <p class="info">
-        <img src="../../assets/illustrations/empty_shot.png" />
+        <img src="../../assets/illustrations/empty_shot.png" alt="" />
       </p>
       <p class="info">{{ $t('episodes.empty_list_client') }}</p>
     </div>
 
     <p class="has-text-centered nb-episodes" v-if="!isEmptyList">
       {{ displayedEpisodesLength }}
-      {{ $tc('episodes.number', displayedEpisodesLength) }}
+      {{ $t('episodes.number', displayedEpisodesLength) }}
     </p>
   </div>
 </template>
@@ -221,7 +227,8 @@ import { mapGetters } from 'vuex'
 import { entityListMixin } from '@/components/mixins/entity_list'
 import { range } from '@/lib/time'
 import {
-  getChartColors,
+  aggregateRetakeStats,
+  aggregateStats,
   getChartData,
   getChartRetakeCount,
   getRetakeChartData
@@ -316,6 +323,18 @@ export default {
 
     isRetakes() {
       return this.dataMode === 'retakes'
+    },
+
+    // The "all" row aggregates the displayed entries only, so it stays
+    // consistent when episodes are filtered (e.g. "only running").
+    displayedEntriesStats() {
+      const entryIds = this.entries.map(entry => entry.id)
+      return { all: aggregateStats(this.episodeStats, entryIds) }
+    },
+
+    displayedEntriesRetakeStats() {
+      const entryIds = this.entries.map(entry => entry.id)
+      return { all: aggregateRetakeStats(this.episodeRetakeStats, entryIds) }
     }
   },
 
@@ -324,20 +343,21 @@ export default {
       if (this.isRetakes) {
         return ['#ff3860', '#6f727a', '#22d160']
       } else {
-        return getChartColors(this.episodeStats, entryId, columnId)
+        return this.chartData(entryId, columnId).map(data => data[2])
       }
     },
 
     chartData(entryId, columnId, dataType = 'count') {
       if (this.isRetakes) {
-        return getRetakeChartData(
-          this.episodeRetakeStats,
-          entryId,
-          columnId,
-          dataType
-        )
+        const stats =
+          entryId === 'all'
+            ? this.displayedEntriesRetakeStats
+            : this.episodeRetakeStats
+        return getRetakeChartData(stats, entryId, columnId, dataType)
       } else {
-        return getChartData(this.episodeStats, entryId, columnId, dataType)
+        const stats =
+          entryId === 'all' ? this.displayedEntriesStats : this.episodeStats
+        return getChartData(stats, entryId, columnId, dataType)
       }
     },
 

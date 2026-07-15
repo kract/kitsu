@@ -69,8 +69,8 @@
                 is-inline
               />
             </div>
-            <div class="mb1 explaination">
-              {{ $t('productions.creation.explaination_type') }}
+            <div class="mb1 explanation">
+              {{ $t('productions.creation.explanation_type') }}
             </div>
             <div class="flexrow">
               <text-field
@@ -134,8 +134,8 @@
                 thin
               />
             </div>
-            <div class="mb1 explaination">
-              {{ $t('productions.creation.explaination_video') }}
+            <div class="mb1 explanation">
+              {{ $t('productions.creation.explanation_video') }}
             </div>
             <div>
               <label class="label">
@@ -159,8 +159,8 @@
                 />
               </div>
             </div>
-            <div class="mb1 explaination">
-              {{ $t('productions.creation.explaination_date') }}
+            <div class="mb1 explanation">
+              {{ $t('productions.creation.explanation_date') }}
             </div>
           </timeline-item>
           <timeline-item
@@ -320,7 +320,11 @@
               <span
                 :key="assetType.id"
                 class="asset-type-name flexrow-item"
+                role="button"
+                tabindex="0"
                 @click="deleteFromList(assetType, 'assetTypes')"
+                @keydown.enter.prevent="deleteFromList(assetType, 'assetTypes')"
+                @keydown.space.prevent="deleteFromList(assetType, 'assetTypes')"
                 v-for="assetType in productionToCreate.assetTypes"
               >
                 {{ assetType.name }}
@@ -513,7 +517,6 @@ import { useRouter } from 'vue-router'
 import { useStore } from 'vuex'
 
 import csv from '@/lib/csv'
-import func from '@/lib/func'
 import { removeModelFromList } from '@/lib/models'
 import { formatSimpleDate } from '@/lib/time'
 import { sortByName } from '@/lib/sorting'
@@ -823,29 +826,22 @@ const deleteFromList = (object, listName) => {
   )
 }
 
-const createTaskTypesAndStatuses = async () => {
-  await func.runPromiseAsSeries(
-    productionToCreate.assetTaskTypes
-      .concat(productionToCreate.shotTaskTypes)
-      .map(async (taskType, index) => {
-        const finalIndex =
-          taskType.for_entity === 'Shot'
-            ? index - productionToCreate.assetTaskTypes.length
-            : index
-        return await store.dispatch('addTaskTypeToProduction', {
-          taskTypeId: taskType.id,
-          priority: finalIndex + 1
-        })
-      })
-      .concat(
-        productionToCreate.taskStatuses.map(async taskStatus => {
-          return await store.dispatch(
-            'addTaskStatusToProduction',
-            taskStatus.id
-          )
-        })
-      )
-  )
+const createProductionSettings = async () => {
+  const taskTypes = productionToCreate.assetTaskTypes
+    .concat(productionToCreate.shotTaskTypes)
+    .map((taskType, index) => {
+      // The priority restarts at 1 for each entity kind.
+      const finalIndex =
+        taskType.for_entity === 'Shot'
+          ? index - productionToCreate.assetTaskTypes.length
+          : index
+      return { taskTypeId: taskType.id, priority: finalIndex + 1 }
+    })
+  await store.dispatch('addSettingsToProduction', {
+    taskTypes,
+    taskStatusIds: productionToCreate.taskStatuses.map(status => status.id),
+    assetTypeIds: productionToCreate.assetTypes.map(assetType => assetType.id)
+  })
 }
 
 const createAssets = async () => {
@@ -860,12 +856,6 @@ const createAssets = async () => {
     }
     loading.importingAssets = false
   }
-}
-
-const createAssetTypes = () => {
-  productionToCreate.assetTypes.map(async at =>
-    store.dispatch('addAssetTypeToProduction', at.id)
-  )
 }
 
 const createShots = async () => {
@@ -969,8 +959,7 @@ const createProduction = async () => {
     const createdProduction = await store.dispatch('newProduction', payload)
     await store.dispatch('setProduction', createdProduction.id)
     if (!hasTemplate) {
-      await createTaskTypesAndStatuses()
-      await createAssetTypes()
+      await createProductionSettings()
     }
     await createAssets()
     if (productionToCreate.production_type !== 'assets') {
@@ -1194,7 +1183,7 @@ span.input-separator {
   align-items: center;
 }
 
-.explaination {
+.explanation {
   font-style: italic;
   margin-top: 0.2em;
 }

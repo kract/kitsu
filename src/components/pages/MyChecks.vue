@@ -62,7 +62,7 @@
         <div class="flexrow">
           <h1 class="title mt1 flexrow-item filler">
             {{ nbTasksToCheck }}
-            {{ $tc('my_checks.title', nbTasksToCheck) }}
+            {{ $t('my_checks.title', nbTasksToCheck) }}
           </h1>
           <button-simple
             class="flexrow-item"
@@ -86,9 +86,10 @@
     </div>
 
     <view-playlist-modal
-      :active="isPlaylist"
+      active
       :task-ids="sortedTasks.map(t => t.id)"
       @cancel="isPlaylist = false"
+      v-if="isPlaylist"
     />
   </div>
 </template>

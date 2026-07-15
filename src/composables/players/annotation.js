@@ -11,24 +11,24 @@ import {
   getFabricDocument,
   util
 } from 'fabric'
-import { PSStroke, PSBrush } from 'fabricjs-psbrush'
+import { PSStroke } from 'fabricjs-psbrush'
 import moment from 'moment'
 import { v4 as uuidv4 } from 'uuid'
 import { markRaw, ref, watch } from 'vue'
 
+import { useDrawingTools } from '@/composables/players/drawingTools'
 import {
   SHAPE_WIDTHS,
   addSerialization,
   attachShapeDrawing,
   buildReadOnlyShape,
   deserializePSStroke,
-  getAnnotationContainMapping,
-  lockBrushToFirstPointer
+  getAnnotationContainMapping
 } from '@/lib/players/annotation'
 import { normalizeType } from '@/lib/players/annotationTypes'
 import {
   Eraser,
-  EraserBrush,
+  hasVisiblePixels,
   reviveObjectEraser
 } from '@/lib/players/eraserbrush'
 import clipboard from '@/lib/clipboard'
@@ -56,15 +56,7 @@ Text.prototype._calculateCurrentDimensions = function () {
   )
 }
 
-/* Monkey patch _getTransformedDimensions() to return a proper fabric point */
 if (PSStroke) {
-  PSStroke.prototype._getTransformedDimensions = function () {
-    const width = this.width * this.scaleX
-    const height = this.height * this.scaleY
-    const dimensions = new Point(width, height)
-    return dimensions
-  }
-
   /* Monkey patches needed to make PSStroke work correctly by adding missing
    * expected methods to deal with Fabric and pressure.
    */
@@ -121,6 +113,9 @@ if (PSStroke) {
  *   local deletion is recorded. Receives `(currentTime, serializedObject)`.
  * @param {Function} [options.postAnnotationUpdate] - hook fired after a
  *   local update is recorded. Receives `(currentTime, serializedObject)`.
+ * @param {Function} [options.getAdditionalPreviews] - extra store previews
+ *   that mirror the current one and must receive the same annotations
+ *   (playlist revision copies). Returns `[{ taskId, preview }]` pairs.
  */
 export const useAnnotation = ({
   mainCanvasComponent,
@@ -141,7 +136,8 @@ export const useAnnotation = ({
   isEraserModeOn = ref(false),
   postAnnotationAddition = () => {},
   postAnnotationDeletion = () => {},
-  postAnnotationUpdate = () => {}
+  postAnnotationUpdate = () => {},
+  getAdditionalPreviews = () => []
 }) => {
   // Canvas instances are owned by AnnotationCanvas components; we
   // mirror them into local refs through watchers so internal code
@@ -218,11 +214,13 @@ export const useAnnotation = ({
         object.set('canvasHeight', fabricCanvas.value.height)
       }
       if (!object.createdBy) object.set('createdBy', userId.value)
+      if (!object.createdAt) object.set('createdAt', new Date().toISOString())
     } else {
       if (!object.id) object.id = uuidv4()
       if (!object.canvasWidth) object.canvasWidth = fabricCanvas.value.width
       if (!object.canvasHeight) object.canvasHeight = fabricCanvas.value.height
       if (!object.createdBy) object.createdBy = userId.value
+      if (!object.createdAt) object.createdAt = new Date().toISOString()
     }
     addSerialization(object)
     return object
@@ -403,6 +401,16 @@ export const useAnnotation = ({
     }
   }
 
+  const removeFromUpdates = obj => {
+    const currentTime = getCurrentTime()
+    const updatesEntry = findAnnotation(updates.value, currentTime)
+    if (updatesEntry) {
+      updatesEntry.drawing.objects = updatesEntry.drawing.objects.filter(
+        updatedObject => updatedObject.id !== obj.id
+      )
+    }
+  }
+
   const addToUpdates = obj => {
     setObjectData(obj)
     addToUpdatesSerializedObject(obj.serialize())
@@ -432,18 +440,6 @@ export const useAnnotation = ({
     additions.value = []
     updates.value = []
     deletions.value = []
-  }
-
-  const printModificationStats = prefix => {
-    // eslint-disable-next-line no-console
-    console.log(
-      prefix,
-      additions.value.length > 0
-        ? additions.value[0].drawing.objects.length
-        : 0,
-      updates.value.length > 0 ? updates.value[0].drawing.objects.length : 0,
-      deletions.value.length > 0 ? deletions.value[0].objects.length : 0
-    )
   }
 
   const isWriting = date => {
@@ -523,10 +519,10 @@ export const useAnnotation = ({
   const updateAnnotationsInStore = () => {
     const preview = currentPreview()
     if (preview) {
-      store.commit('UPDATE_PREVIEW_ANNOTATION', {
-        taskId: preview.task_id,
-        preview: preview,
-        annotations: annotations.value
+      store.dispatch('updatePreviewAnnotations', {
+        preview,
+        annotations: annotations.value,
+        extraPreviews: getAdditionalPreviews()
       })
     }
   }
@@ -584,6 +580,10 @@ export const useAnnotation = ({
 
     const base = {
       id: obj.id,
+      // Authorship metadata must survive the reload, or the next save
+      // re-attributes the object to the current user via setObjectData.
+      createdAt: obj.createdAt,
+      createdBy: obj.createdBy,
       fill: 'transparent',
       left: obj.left * scale + offsetX,
       top: obj.top * scale + offsetY,
@@ -732,109 +732,6 @@ export const useAnnotation = ({
 
   // Events
 
-  const onChangePencilColor = color => {
-    pencilColor.value = color
-    _resetColor()
-    localPreferences.setPreference('player:pencil-color', pencilColor.value)
-  }
-
-  const onChangePencilWidth = pencil => {
-    pencilWidth.value = pencil
-    _resetPencil()
-    localPreferences.setPreference('player:pencil-width', pencilWidth.value)
-  }
-
-  const onChangeTextColor = newValue => {
-    textColor.value = newValue
-    localPreferences.setPreference('player:text-color', textColor.value)
-  }
-
-  const _resetColor = () => {
-    if (!fabricCanvas.value) return
-    fabricCanvas.value.freeDrawingBrush.color = pencilColor.value
-  }
-
-  const _resetPencil = () => {
-    if (!fabricCanvas.value) return
-    const converter = {
-      huge: 30,
-      big: 20,
-      medium: 10,
-      small: 4,
-      tiny: 2
-    }
-    const strokeWidth = converter[pencilWidth.value]
-    fabricCanvas.value.freeDrawingBrush.width = strokeWidth
-  }
-
-  const resetPencilConfiguration = () => {
-    pencilColor.value =
-      localPreferences.getPreference('player:pencil-color') || '#ff3860'
-    textColor.value =
-      localPreferences.getPreference('player:text-color') || '#ff3860'
-    pencilWidth.value =
-      localPreferences.getPreference('player:pencil-width') || 'big'
-
-    _resetColor()
-    _resetPencil()
-  }
-
-  // Drawing config
-
-  const onAnnotateClicked = () => {
-    showCanvas()
-    // Toggle off only when the pencil itself is the active brush. If the
-    // eraser is on, switch over to the pencil instead of turning drawing off.
-    if (fabricCanvas.value.isDrawingMode && !isEraserModeOn.value) {
-      fabricCanvas.value.isDrawingMode = false
-      return
-    }
-    isEraserModeOn.value = false
-    if (fabricCanvas.value) {
-      fabricCanvas.value.isDrawingMode = true
-    }
-    const brush = new PSBrush(fabricCanvas.value)
-    brush.pressureManager.fallback = 0.5
-    // PSBrush drops BaseBrush's round cap/join defaults (its initialize
-    // doesn't call super), so restore them or strokes get flat ends.
-    brush.strokeLineCap = 'round'
-    brush.strokeLineJoin = 'round'
-    lockBrushToFirstPointer(brush)
-    fabricCanvas.value.freeDrawingBrush = brush
-    _resetColor()
-    _resetPencil()
-  }
-
-  // Eraser tool — mirror of onAnnotateClicked. Installs the v2 EraserBrush
-  // (destination-out). Type-selectivity is handled per-object by the
-  // `erasable` flag (IText is non-erasable), not by z-order.
-  const onEraseClicked = () => {
-    showCanvas()
-    if (isEraserModeOn.value) {
-      isEraserModeOn.value = false
-      if (fabricCanvas.value) fabricCanvas.value.isDrawingMode = false
-      return
-    }
-    isEraserModeOn.value = true
-    isShapeMode.value = false
-    if (fabricCanvas.value) {
-      fabricCanvas.value.isDrawingMode = true
-      const brush = new EraserBrush(fabricCanvas.value)
-      brush.strokeLineCap = 'round'
-      brush.strokeLineJoin = 'round'
-      lockBrushToFirstPointer(brush)
-      fabricCanvas.value.freeDrawingBrush = brush
-      _resetEraserWidth()
-    }
-  }
-
-  const _resetEraserWidth = () => {
-    if (!fabricCanvas.value?.freeDrawingBrush) return
-    // Reuse the pencil-width preference (same mapping as _resetPencil).
-    const converter = { huge: 30, big: 20, medium: 10, small: 4, tiny: 2 }
-    fabricCanvas.value.freeDrawingBrush.width = converter[pencilWidth.value]
-  }
-
   const onObjectAdded = obj => {
     if (silentAnnotation) return
     let o = obj.target ? obj.target : obj.targets[0]
@@ -857,16 +754,35 @@ export const useAnnotation = ({
     }
   }
 
-  // Erasing mutates existing objects (it appends a path to each object's
-  // `eraser` mask), so it is an UPDATE, not an addition. We re-serialise the
-  // affected objects — their patched toObject() carries the new eraser — and
-  // record a single undoable 'erase' action.
+  const removeFullyErasedObject = obj => {
+    const activeObject = fabricCanvas.value.getActiveObject?.()
+    if (activeObject === obj || activeObject?._objects?.includes(obj)) {
+      fabricCanvas.value.discardActiveObject()
+    }
+    fabricCanvas.value.remove(obj)
+    removeFromUpdates(obj)
+    addToDeletions(obj)
+  }
+
   const onErasingEnd = ({ targets = [], subTargets = [], path } = {}) => {
     if (silentAnnotation) return
-    const affected = [...targets, ...subTargets]
+    const affected = [...new Set([...targets, ...subTargets])]
     if (affected.length === 0) return
-    affected.forEach(obj => addToUpdates(obj))
-    doneActionStack.push({ type: 'erase', targets: affected, path })
+    const removedTargets = []
+    affected.forEach(obj => {
+      if (hasVisiblePixels(obj)) {
+        addToUpdates(obj)
+      } else {
+        removeFullyErasedObject(obj)
+        removedTargets.push(obj)
+      }
+    })
+    doneActionStack.push({
+      type: 'erase',
+      targets: affected,
+      removedTargets,
+      path
+    })
     clearUndoneStack()
     saveAnnotationsCb()
   }
@@ -936,6 +852,23 @@ export const useAnnotation = ({
       action.removed.push({ id: obj.id, obj, path: obj.eraser._objects.pop() })
       if (obj.eraser._objects.length === 0) obj.eraser = undefined
       obj.set('dirty', true)
+      if (action.removedTargets.includes(t)) {
+        silentAnnotation = true
+        try {
+          fabricCanvas.value.add(obj)
+        } finally {
+          silentAnnotation = false
+        }
+        removeFromDeletions(obj)
+        // The object may no longer exist in the saved drawing (its deletion
+        // was already saved): zou drops updates for unknown ids and remote
+        // viewers ignore them, so the restore must be an addition. The
+        // update below still runs: zou applies additions first, so when the
+        // object still exists server-side (same-batch undo) the addition is
+        // ignored and the update carries the restored state.
+        setObjectData(obj)
+        addToAdditions(obj)
+      }
       addToUpdates(obj)
     })
     fabricCanvas.value?.requestRenderAll()
@@ -950,7 +883,13 @@ export const useAnnotation = ({
       if (!target.eraser) target.eraser = new Eraser()
       target.eraser._objects.push(path)
       target.set('dirty', true)
-      addToUpdates(target)
+      if (
+        action.removedTargets.some(removedTarget => removedTarget.id === id)
+      ) {
+        removeFullyErasedObject(target)
+      } else {
+        addToUpdates(target)
+      }
     })
     fabricCanvas.value?.requestRenderAll()
   }
@@ -1027,52 +966,6 @@ export const useAnnotation = ({
 
   const setAnnotationCanvasDimensions = (width, height) => {
     fabricCanvas.value.setDimensions({ width, height })
-  }
-
-  const setAnnotationDrawingMode = isDrawingMode => {
-    if (isDrawingMode) {
-      isShapeMode.value = false
-      // Coming back to the pencil from the eraser: the eraser swapped
-      // freeDrawingBrush for an EraserBrush, so restore the pressure brush
-      // (consumers that toggle drawing through this entry point — e.g.
-      // PreviewPlayer — never re-create a PSBrush themselves).
-      if (fabricCanvas.value?.freeDrawingBrush instanceof EraserBrush) {
-        isEraserModeOn.value = false
-        const brush = new PSBrush(fabricCanvas.value)
-        brush.pressureManager.fallback = 0.5
-        brush.strokeLineCap = 'round'
-        brush.strokeLineJoin = 'round'
-        lockBrushToFirstPointer(brush)
-        fabricCanvas.value.freeDrawingBrush = brush
-        _resetColor()
-        _resetPencil()
-      }
-    } else if (isEraserModeOn.value) {
-      // The eraser runs in drawing mode. A stray "leave drawing" — typically
-      // the isDrawing watcher firing async as the user switches pencil→eraser
-      // (onEraseClicked set isDrawing=false) — must not tear it down, or the
-      // eraser stops working and its ring cursor reverts to the default.
-      return
-    }
-    fabricCanvas.value.isDrawingMode = isDrawingMode
-  }
-
-  const toggleShapeMode = () => {
-    if (isShapeMode.value) {
-      isShapeMode.value = false
-      return
-    }
-    isShapeMode.value = true
-    // Mutex with the freehand drawing mode owned by the composable.
-    // Consumers (PreviewPlayer / PlaylistPlayer) own `isDrawing` /
-    // `isTyping` refs and clear them via a watcher on `isShapeMode`.
-    if (fabricCanvas.value) {
-      fabricCanvas.value.isDrawingMode = false
-    }
-  }
-
-  const setShapeTool = shape => {
-    currentShape.value = shape
   }
 
   // Suppress object selection while shape mode is active so a mousedown
@@ -1454,6 +1347,11 @@ export const useAnnotation = ({
   }
 
   const endAnnotationSaving = () => {
+    // A save is already in flight: keep accumulating in the active
+    // arrays instead of overwriting the in-flight buffer (which lost
+    // strokes on failure and duplicated them on success). The next batch
+    // is flushed by confirmAnnotationsSaved / restoreFailedAnnotations.
+    if (pendingSave) return
     if (notSaved.value) {
       const preview = annotatedPreview
       pendingSave = markRaw({
@@ -1550,6 +1448,32 @@ export const useAnnotation = ({
     }
   }
 
+  // Pencil / eraser / shape / text tool transitions and brush configuration
+  // live in their own module; the facade re-exposes them unchanged.
+  const {
+    onChangePencilColor,
+    onChangePencilWidth,
+    onChangeTextColor,
+    _resetColor,
+    _resetPencil,
+    resetPencilConfiguration,
+    onAnnotateClicked,
+    onEraseClicked,
+    setAnnotationDrawingMode,
+    toggleShapeMode,
+    setShapeTool
+  } = useDrawingTools({
+    fabricCanvas,
+    isEraserModeOn,
+    isShapeMode,
+    currentShape,
+    pencilColor,
+    pencilWidth,
+    textColor,
+    showCanvas,
+    localPreferences
+  })
+
   // Helper to get the current preview (needed by updateAnnotationsInStore)
   let currentPreview = () => null
   const setCurrentPreviewGetter = getter => {
@@ -1633,7 +1557,6 @@ export const useAnnotation = ({
     addToUpdates,
     addToUpdatesSerializedObject,
     clearModifications,
-    printModificationStats,
     isWriting,
 
     // Annotations

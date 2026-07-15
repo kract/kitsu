@@ -155,15 +155,27 @@
                     {{ $t('tasks.set_preview') }}
                   </span>
                 </button>
+                <label
+                  class="flexrow-item pointer"
+                  v-if="isMovie && isCurrentUserManager"
+                >
+                  <input
+                    class="mr02"
+                    type="checkbox"
+                    v-model="isUseCurrentFrame"
+                  />
+                  {{ $t('tasks.use_current_frame') }}
+                </label>
                 <span class="error flexrow-item" v-if="errors.setPreview">
                   {{ $t('tasks.set_preview_error') }}
                 </span>
               </div>
               <view-playlist-modal
-                :active="modals.hookupPlaylist"
-                :task-ids="hookupPlaylistTaskIds"
+                active
                 sort
+                :task-ids="hookupPlaylistTaskIds"
                 @cancel="hideHookupPlaylistModal"
+                v-if="modals.hookupPlaylist"
               />
             </div>
 
@@ -221,25 +233,25 @@
                     <td class="field-label">
                       {{ $t('tasks.fields.start_date') }}
                     </td>
-                    <td>{{ formatSimpleDate(task.start_date) }}</td>
+                    <td>{{ formatDisplayDate(task.start_date) }}</td>
                   </tr>
                   <tr class="datatable-row">
                     <td class="field-label">
                       {{ $t('tasks.fields.due_date') }}
                     </td>
-                    <td>{{ formatSimpleDate(task.due_date) }}</td>
+                    <td>{{ formatDisplayDate(task.due_date) }}</td>
                   </tr>
                   <tr class="datatable-row">
                     <td class="field-label">
                       {{ $t('tasks.fields.end_date') }}
                     </td>
-                    <td>{{ formatSimpleDate(task.end_date) }}</td>
+                    <td>{{ formatDisplayDate(task.end_date) }}</td>
                   </tr>
                   <tr class="datatable-row">
                     <td class="field-label">
                       {{ $t('tasks.fields.done_date') }}
                     </td>
-                    <td>{{ formatSimpleDate(task.done_date) }}</td>
+                    <td>{{ formatDisplayDate(task.done_date) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -423,7 +435,10 @@ import { mapGetters, mapActions } from 'vuex'
 import drafts from '@/lib/drafts'
 import { getTaskEntityPath, getTaskEntitiesPath } from '@/lib/path'
 import { formatRevision } from '@/lib/preview'
-import { getTaskTypePriorityOfProd } from '@/lib/productions'
+import {
+  getTaskTypePriorityOfProd,
+  getTaskTypeWithUrl
+} from '@/lib/productions'
 import { sortPeople } from '@/lib/sorting'
 
 import { formatListMixin } from '@/components/mixins/format'
@@ -493,6 +508,7 @@ export default {
       draftComment: {},
       previewForms: [],
       currentFrame: 0,
+      isUseCurrentFrame: false,
       currentTask: null,
       hookupPlaylistTaskIds: [],
       selectedTab: 'validation',
@@ -945,12 +961,13 @@ export default {
         .filter(taskType => entity_tasks[taskType.id])
 
         // add a url that points to the task
-        .map(taskType => {
-          const task = entity_tasks[taskType.id]
-          if (task)
-            taskType.url = `/productions/${task.project_id}/episodes/${task.episode_id || 'all'}/${task_type_entity_slug}/tasks/${task.id}`
-          return taskType
-        })
+        .map(taskType =>
+          getTaskTypeWithUrl(
+            taskType,
+            entity_tasks[taskType.id],
+            task_type_entity_slug
+          )
+        )
       return filtered
     }
   },
@@ -1017,23 +1034,20 @@ export default {
         this.taskLoading = { isLoading: true, isError: false }
         return this.loadTask({ taskId: this.route.params.task_id })
           .then(task => {
-            let loadingFunction = callback => {
-              this.loadAssets().then(callback)
-            }
+            let loadingFunction = () => this.loadAssets()
 
             if (task.entity_type_name === 'Shot') {
-              loadingFunction = callback => {
+              loadingFunction = () =>
                 this.loadEpisodes()
                   .then(() => {
                     if (this.isTVShow) {
                       this.setCurrentEpisode(task.episode.id)
                     }
-                    this.loadShots(callback)
+                    return this.loadShots()
                   })
-                  .catch(callback)
-              }
+                  .catch(err => console.error(err))
             }
-            return loadingFunction(() => {
+            return loadingFunction().then(() => {
               this.task = task
               return this.loadTaskComments({
                 taskId: task.id,
@@ -1246,11 +1260,16 @@ export default {
       this.loading.setPreview = true
       this.errors.setPreview = false
       const previewId = previewPlayer.currentPreview.id
+      const frame =
+        this.isMovie && this.isUseCurrentFrame
+          ? this.currentFrame + 1
+          : undefined
       this.$store
         .dispatch('setPreview', {
           taskId: this.task.id,
           entityId: this.task.entity.id,
-          previewId
+          previewId,
+          frame
         })
         .then(() => {
           this.loading.setPreview = false
@@ -1415,7 +1434,8 @@ export default {
           updates
         })
         previewPlayer?.confirmAnnotationsSaved()
-      } catch {
+      } catch (err) {
+        console.error('Failed to save annotations', err)
         previewPlayer?.restoreFailedAnnotations()
       }
     },

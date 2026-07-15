@@ -117,6 +117,7 @@
         :zoom-level="zoomLevel"
         :is-loading="loading.schedule"
         :is-error="errors.schedule"
+        clip-children
         is-estimation-linked
         hide-man-days
         :multiline="isTVShow"
@@ -142,7 +143,14 @@
       v-if="isSidePanelOpen && !isLockedSchedule && !isTVShow"
     >
       <div class="side">
-        <a class="close-button" @click="toggleSidePanel">
+        <a
+          class="close-button"
+          role="button"
+          tabindex="0"
+          @click="toggleSidePanel"
+          @keydown.enter.prevent="toggleSidePanel"
+          @keydown.space.prevent="toggleSidePanel"
+        >
           <x-icon class="align-middle" :size="16" />
         </a>
         <h2 class="mt1">
@@ -186,10 +194,13 @@
             <div
               class="assignment-item"
               draggable="true"
+              role="button"
+              tabindex="0"
               @dragstart="
                 onAssignmentItemDragStart($event, entityType, selectedTaskType)
               "
               @click="onAssignmentItemSelected(entityType)"
+              @keydown.enter.prevent="onAssignmentItemSelected(entityType)"
             >
               <grip-vertical-icon class="icon" />
               <span class="name">
@@ -198,7 +209,15 @@
               </span>
               <span
                 class="expand"
+                role="button"
+                tabindex="0"
                 @click.stop="entityType.expanded = !entityType.expanded"
+                @keydown.enter.stop.prevent="
+                  entityType.expanded = !entityType.expanded
+                "
+                @keydown.space.stop.prevent="
+                  entityType.expanded = !entityType.expanded
+                "
               >
                 <chevron-right-icon v-if="!entityType.expanded" />
                 <chevron-down-icon v-else />
@@ -212,6 +231,8 @@
                 <div
                   class="assignment-item"
                   draggable="true"
+                  role="button"
+                  tabindex="0"
                   @dragstart="
                     onAssignmentItemDragStart(
                       $event,
@@ -220,6 +241,12 @@
                     )
                   "
                   @click="
+                    onAssignmentItemSelected({
+                      ...entityType,
+                      children: [child]
+                    })
+                  "
+                  @keydown.enter.prevent="
                     onAssignmentItemSelected({
                       ...entityType,
                       children: [child]
@@ -290,7 +317,11 @@
                     <a
                       class="reset-assignees"
                       :title="$t('schedule.reset_list')"
+                      role="button"
+                      tabindex="0"
                       @click="assignments.excludes = []"
+                      @keydown.enter.prevent="assignments.excludes = []"
+                      @keydown.space.prevent="assignments.excludes = []"
                       v-if="assignments.excludes.length"
                     >
                       <list-restart-icon
@@ -357,7 +388,11 @@
               />
               <a
                 class="reset-quotas ml05"
+                role="button"
+                tabindex="0"
                 @click="assignments.forcedDailyQuota = null"
+                @keydown.enter.prevent="assignments.forcedDailyQuota = null"
+                @keydown.space.prevent="assignments.forcedDailyQuota = null"
                 v-if="assignments.forcedDailyQuota"
               >
                 <trash-icon class="align-middle" :size="14" />
@@ -396,7 +431,7 @@
                 :step="0.01"
                 placeholder="0.00"
                 type="number"
-                :unit-label="$t('schedule.md')"
+                :unit-label="durationUnit"
                 v-model="assignments.task.estimation"
               />
             </div>
@@ -474,6 +509,18 @@
     @cancel="modals.applyScheduleVersion = false"
     @confirm="applyToProduction()"
     v-if="modals.applyScheduleVersion"
+  />
+  <confirm-modal
+    active
+    :text="
+      $t(
+        'schedule.confirm_move_children',
+        pendingParentChange ? pendingParentChange.affected.length : 0
+      )
+    "
+    @cancel="cancelChildMove"
+    @confirm="confirmChildMove"
+    v-if="modals.confirmChildMove"
   />
 </template>
 
@@ -623,8 +670,10 @@ export default {
       modals: {
         editScheduleVersion: false,
         deleteScheduleVersion: false,
-        applyScheduleVersion: false
-      }
+        applyScheduleVersion: false,
+        confirmChildMove: false
+      },
+      pendingParentChange: null
     }
   },
 
@@ -1340,14 +1389,24 @@ export default {
           this.saveScheduleItem(item.parentElement)
         }
       } else if (!item.parentElement) {
-        const minDate = this.getMinDate(item)
-        const maxDate = this.getMaxDate(item)
-        if (item.startDate.isAfter(minDate)) {
-          item.startDate = minDate
+        if (!Array.isArray(item.children)) {
+          await this.updateScheduleItem(item)
+          return
         }
-        if (item.endDate.isBefore(maxDate)) {
-          item.endDate = maxDate
+        const affected = item.children.filter(
+          child =>
+            child._dragOrigStartDate &&
+            child._dragOrigEndDate &&
+            (!child.startDate.isSame(child._dragOrigStartDate) ||
+              !child.endDate.isSame(child._dragOrigEndDate))
+        )
+        if (!affected.length) {
+          await this.updateScheduleItem(item)
+          return
         }
+        this.pendingParentChange = { item, affected }
+        this.modals.confirmChildMove = true
+        return
       }
 
       await this.updateScheduleItem(item)
@@ -1366,6 +1425,33 @@ export default {
       if (!this.isVersioned) {
         await this.saveScheduleItem(item)
       }
+    },
+
+    async confirmChildMove() {
+      const { item, affected } = this.pendingParentChange
+      try {
+        await Promise.all(
+          [item, ...affected].map(element => this.updateScheduleItem(element))
+        )
+      } finally {
+        this.pendingParentChange = null
+        this.modals.confirmChildMove = false
+      }
+    },
+
+    cancelChildMove() {
+      const { item, affected } = this.pendingParentChange
+      item.startDate = item._dragOrigStartDate.clone()
+      item.endDate = item._dragOrigEndDate.clone()
+      if (item._dragOrigEstimation !== undefined) {
+        item.estimation = item._dragOrigEstimation
+      }
+      affected.forEach(child => {
+        child.startDate = child._dragOrigStartDate.clone()
+        child.endDate = child._dragOrigEndDate.clone()
+      })
+      this.pendingParentChange = null
+      this.modals.confirmChildMove = false
     },
 
     getMinDate(parentElement) {
@@ -1659,6 +1745,11 @@ export default {
         const startDate = parseDate(this.assignments.startDate)
         const endDate = parseDate(this.assignments.endDate)
 
+        // accumulated during the distribution loop, flushed as one
+        // clear-assignation request plus one assign request per assignee
+        const taskIdsToUnassign = []
+        const taskIdsByAssignee = new Map()
+
         let cumulatedTasks = 0
         let nextAssigneeIndex = 0
         let nextStartDate = startDate.clone()
@@ -1688,7 +1779,7 @@ export default {
             if (this.isVersioned) {
               versionedTask.assignees = []
             } else {
-              await this.unassignSelectedTasks({ taskIds: [task.id] })
+              taskIdsToUnassign.push(task.id)
             }
           }
 
@@ -1737,25 +1828,23 @@ export default {
                   await this.updateScheduleVersionedTask(versionedTask)
                 }
               } else {
-                await Promise.all([
-                  // assign task to the current assignee
-                  this.assignSelectedTasks({
-                    personId: taskAssignee.id,
-                    taskIds: [task.id]
-                  }),
-                  // save task dates & estimation
-                  this.updateTask({
-                    taskId: task.id,
-                    data: {
-                      estimation: daysToMinutes(
-                        this.organisation,
-                        taskEstimation
-                      ),
-                      start_date: taskStartDate.format('YYYY-MM-DD'),
-                      due_date: taskEndDate.format('YYYY-MM-DD')
-                    }
-                  })
-                ])
+                // assignation to the current assignee is batched after the loop
+                if (!taskIdsByAssignee.has(taskAssignee.id)) {
+                  taskIdsByAssignee.set(taskAssignee.id, [])
+                }
+                taskIdsByAssignee.get(taskAssignee.id).push(task.id)
+                // save task dates & estimation
+                await this.updateTask({
+                  taskId: task.id,
+                  data: {
+                    estimation: daysToMinutes(
+                      this.organisation,
+                      taskEstimation
+                    ),
+                    start_date: taskStartDate.format('YYYY-MM-DD'),
+                    due_date: taskEndDate.format('YYYY-MM-DD')
+                  }
+                })
               }
               // set next start date
               if ((cumulatedTasks * taskEstimation) % 1 !== 0) {
@@ -1766,6 +1855,15 @@ export default {
               break // jump to next task
             }
           }
+        }
+
+        // unassign first so batched assignations are not cleared right after
+        if (taskIdsToUnassign.length > 0) {
+          await this.unassignSelectedTasks({ taskIds: taskIdsToUnassign })
+        }
+        // Sequence the per-assignee requests instead of firing them at once.
+        for (const [personId, taskIds] of taskIdsByAssignee) {
+          await this.assignSelectedTasks({ personId, taskIds })
         }
 
         // refresh schedule
@@ -1798,15 +1896,12 @@ export default {
         // update task and assignments
         await this.onScheduleItemChanged(task)
         if (!this.isVersioned) {
-          await this.unassignSelectedTasks({ taskIds: [task.id] })
-          await Promise.all(
-            task.assignees.map(personId =>
-              this.assignSelectedTasks({
-                personId,
-                taskIds: [task.id]
-              })
-            )
-          )
+          // One task update carrying the full assignee list replaces the
+          // unassign request plus one assign request per person.
+          await this.updateTask({
+            taskId: task.id,
+            data: { assignees: task.assignees }
+          })
         }
         // refresh task in side panel
         this.assignments.task.startDate = task.startDate.format('YYYY-MM-DD')
@@ -2139,7 +2234,7 @@ export default {
                   null,
                   null,
                   null,
-                  `${task.entity.name} (${duration}md)`
+                  `${task.entity.name} (${duration}${this.durationUnit})`
                 ])
 
                 // fill task timebar
@@ -2149,7 +2244,7 @@ export default {
                 const endIndex = dates.indexOf(end_date)
                 for (let i = startIndex; i > -1 && i <= endIndex; i++) {
                   const cell = row.getCell(datesColumn + i)
-                  cell.note = `${task.entity.name}\n${start_date} - ${end_date}\n${duration} ${this.$t('schedule.md')}`
+                  cell.note = `${task.entity.name}\n${start_date} - ${end_date}\n${duration} ${this.durationUnit}`
                   cell.fill = {
                     type: 'pattern',
                     pattern: 'solid',

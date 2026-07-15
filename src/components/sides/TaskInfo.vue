@@ -30,10 +30,10 @@
           ((nbSelectedTasks || 0) > 1 || nbSelectedValidations > 0)
         "
       >
-        <h1 class="title">
-          {{ $tc('tasks.selected_tasks') }}
+        <h2 class="title">
+          {{ $t('tasks.selected_tasks') }}
           ({{ nbSelectedTasks }})
-        </h1>
+        </h2>
         <div class="task-list mt1">
           <div
             class="selected-task-line flexrow"
@@ -48,7 +48,11 @@
             <span class="flexrow-item">{{ task.entity_name }}</span>
             <span
               class="flexrow-item pointer"
+              role="button"
+              tabindex="0"
               @click="removeTaskFromSelection(task)"
+              @keydown.enter.prevent="removeTaskFromSelection(task)"
+              @keydown.space.prevent="removeTaskFromSelection(task)"
             >
               <x-icon :size="12" />
             </span>
@@ -56,7 +60,7 @@
           <div class="mt2 selected-task-line" v-if="nbSelectedValidations > 0">
             <span v-if="nbSelectedTasks > 0">+</span>
             {{ nbSelectedValidations }}
-            {{ $tc('tasks.empty_cells_selected', nbSelectedValidations) }}
+            {{ $t('tasks.empty_cells_selected', nbSelectedValidations) }}
           </div>
         </div>
       </div>
@@ -335,7 +339,7 @@
         />
       </div>
       <div class="side task-info pa1" v-else-if="nbSelectedEntities > 0">
-        <h1 class="title mt2">{{ $tc('tasks.selected_entities') }}</h1>
+        <h2 class="title mt2">{{ $t('tasks.selected_entities') }}</h2>
         <div class="pa2 mt1">
           <div
             class="entity-line"
@@ -381,6 +385,7 @@ import {
 } from '@/lib/path'
 import preferences from '@/lib/preferences'
 import { formatRevision } from '@/lib/preview'
+import { getTaskTypeWithUrl } from '@/lib/productions'
 import { getTaskTypeStyle } from '@/lib/render'
 import { sortPeople, sortTaskNames } from '@/lib/sorting'
 import stringHelpers from '@/lib/string'
@@ -665,12 +670,13 @@ export default {
         .filter(taskType => entity_tasks[taskType.id])
 
         // add a url that points to the task
-        .map(taskType => {
-          const task = entity_tasks[taskType.id]
-          if (task)
-            taskType.url = `/productions/${task.project_id}/episodes/${task.episode_id || 'all'}/${task_type_entity_slug}/tasks/${task.id}`
-          return taskType
-        })
+        .map(taskType =>
+          getTaskTypeWithUrl(
+            taskType,
+            entity_tasks[taskType.id],
+            task_type_entity_slug
+          )
+        )
       return filtered
     },
 
@@ -1492,7 +1498,7 @@ export default {
           comment.replies.forEach(reply =>
             commentLines.push([
               this.formatDate(reply.date),
-              'Reply', // FIXME: i18n
+              this.$t('main.reply'),
               this.personMap.get(reply.person_id).name,
               reply.text,
               null,
@@ -1561,7 +1567,7 @@ export default {
     },
 
     refreshPreviewPlay() {
-      this.$refs['preview-player']?.previewViewer?.resize()
+      this.$refs['preview-player']?.resize()
     },
 
     removeTaskFromSelection(task) {
@@ -1766,13 +1772,13 @@ export default {
   .add-comment,
   .comment,
   .no-comment {
-    background: #46494f;
+    background: var(--background-alt);
     border-color: $dark-grey;
     box-shadow: 0 0 6px #333;
   }
 
   .extend-bar {
-    background: #46494f;
+    background: var(--background-alt);
   }
 
   .no-preview {
@@ -1780,7 +1786,7 @@ export default {
   }
 
   .side {
-    background: #36393f;
+    background: var(--background);
   }
 
   .task-info {
