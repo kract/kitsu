@@ -90,7 +90,7 @@
                   ? `${offsets['validation-' + columnIndexInGrid]}px`
                   : '0'
               "
-              type="editor"
+              type="sequences"
               is-stick
               @show-header-menu="
                 event => showHeaderMenu(columnId, columnIndexInGrid, event)
@@ -202,6 +202,7 @@
                   estimation: !isSequenceEstimation
                 }"
                 namespace="sequences"
+                :production-id="currentProduction?.id"
                 v-model="metadataDisplayHeaders"
                 v-model:is-open="columnSelectorDisplayed"
                 v-if="displaySettings.showInfos"
@@ -312,7 +313,8 @@
                   :row-x="i"
                   :selected="isSelected(i, j)"
                   :sticked="true"
-                  :task-test="taskMap.get(sequence.validations.get(columnId))"
+                  :task-href="taskHref(sequence.validations?.get(columnId))"
+                  :task-test="taskMap.get(sequence.validations?.get(columnId))"
                   @select="infos => onTaskSelected(infos, true)"
                   @unselect="infos => onTaskUnselected(infos, true)"
                   v-for="(columnId, j) in stickedDisplayedValidationColumns"
@@ -431,6 +433,7 @@
                   :key="`${columnId}-${sequence.id}`"
                   :column="taskTypeMap.get(columnId)"
                   :entity="sequence"
+                  :task-href="taskHref(sequence.validations?.get(columnId))"
                   :task-test="
                     taskMap.get(
                       sequence.validations
@@ -465,19 +468,17 @@
 
     <table-info :is-loading="isLoading" :is-error="isError" big-cells />
 
-    <div
-      class="has-text-centered"
-      v-if="isEmptyList && !isCurrentUserClient && !isLoading"
-    >
-      <p class="info">
-        <img src="../../assets/illustrations/empty_shot.png" alt="" />
-      </p>
-      <p class="info">{{ $t('sequences.empty_list_client') }}</p>
-    </div>
+    <empty-list
+      :text="$t('sequences.empty_list')"
+      :read-only-text="$t('sequences.empty_list_read_only')"
+      :button-text="$t('sequences.new_sequences')"
+      @create="$emit('add-sequences')"
+      v-if="isEmptyList && !isLoading"
+    />
 
     <p class="has-text-centered nb-sequences" v-if="!isEmptyList && !isLoading">
       {{ displayedSequencesLength }}
-      {{ $t('sequences.number', displayedSequencesLength) }}
+      {{ $t('sequences.number', { count: displayedSequencesLength }) }}
       <span
         v-if="
           displayedSequencesTimeSpent > 0 || displayedSequencesEstimation > 0
@@ -486,26 +487,22 @@
         ({{ formatDuration(displayedSequencesTimeSpent) }}
         {{
           isDurationInHours
-            ? $t(
-                'main.hours_spent',
-                formatDuration(displayedSequencesTimeSpent, false)
-              )
-            : $t(
-                'main.days_spent',
-                formatDuration(displayedSequencesTimeSpent, false)
-              )
+            ? $t('main.hours_spent', {
+                count: formatDuration(displayedSequencesTimeSpent, false)
+              })
+            : $t('main.days_spent', {
+                count: formatDuration(displayedSequencesTimeSpent, false)
+              })
         }},
         {{ formatDuration(displayedSequencesEstimation) }}
         {{
           isDurationInHours
-            ? $t(
-                'main.hours_estimated',
-                formatDuration(displayedSequencesEstimation, false)
-              )
-            : $t(
-                'main.man_days',
-                formatDuration(displayedSequencesEstimation, false)
-              )
+            ? $t('main.hours_estimated', {
+                count: formatDuration(displayedSequencesEstimation, false)
+              })
+            : $t('main.man_days', {
+                count: formatDuration(displayedSequencesEstimation, false)
+              })
         }})
       </span>
     </p>
@@ -515,7 +512,7 @@
 <script>
 import { mapGetters, mapActions } from 'vuex'
 
-import { getEntityPath } from '@/lib/path'
+import { getEntityPath, getTaskHref } from '@/lib/path'
 import { descriptorMixin } from '@/components/mixins/descriptors'
 import { domMixin } from '@/components/mixins/dom'
 import { entityListMixin } from '@/components/mixins/entity_list'
@@ -524,6 +521,7 @@ import { selectionListMixin } from '@/components/mixins/selection'
 
 import ButtonSimple from '@/components/widgets/ButtonSimple.vue'
 import DescriptionCell from '@/components/cells/DescriptionCell.vue'
+import EmptyList from '@/components/widgets/EmptyList.vue'
 import EntityThumbnail from '@/components/widgets/EntityThumbnail.vue'
 import MetadataHeader from '@/components/cells/MetadataHeader.vue'
 import MetadataInput from '@/components/cells/MetadataInput.vue'
@@ -574,7 +572,13 @@ export default {
     }
   },
 
-  emits: ['create-tasks', 'delete-clicked', 'edit-clicked', 'metadata-changed'],
+  emits: [
+    'add-sequences',
+    'create-tasks',
+    'delete-clicked',
+    'edit-clicked',
+    'metadata-changed'
+  ],
 
   data() {
     return {
@@ -608,6 +612,7 @@ export default {
   components: {
     ButtonSimple,
     DescriptionCell,
+    EmptyList,
     EntityThumbnail,
     MetadataHeader,
     MetadataInput,
@@ -631,10 +636,9 @@ export default {
       'displayedSequencesTimeSpent',
       'displaySettings.bigThumbnails',
       'isCurrentUserAdmin',
-      'isCurrentUserManager',
-      'isCurrentUserSupervisor',
       'isCurrentUserClient',
       'isSingleSequence',
+      'isTVShow',
       'isSequenceDescription',
       'isSequenceEstimation',
       'isSequenceResolution',
@@ -652,6 +656,13 @@ export default {
       'taskTypeMap',
       'user'
     ]),
+
+    // Production-scoped: effective role on the current production (global
+    // admins/managers still pass, but a per-project override wins).
+    ...mapGetters({
+      isCurrentUserManager: 'isCurrentUserProductionManager',
+      isCurrentUserSupervisor: 'isCurrentUserProductionSupervisor'
+    }),
 
     isEmptyList() {
       return (
@@ -692,6 +703,17 @@ export default {
 
     isSelected(lineIndex, columnIndex) {
       return this.sequenceSelectionGrid.has(`${lineIndex}-${columnIndex}`)
+    },
+
+    taskHref(taskId) {
+      return getTaskHref(
+        this.$router,
+        this.taskMap.get(taskId),
+        this.currentProduction,
+        this.isTVShow,
+        this.currentEpisode,
+        this.taskTypeMap
+      )
     },
 
     sequencePath(sequenceId) {
@@ -822,10 +844,6 @@ span.thumbnail-empty {
 
 .info {
   margin-top: 2em;
-}
-
-.info img {
-  max-width: 80vh;
 }
 
 .datatable-row th.name {

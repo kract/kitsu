@@ -1,13 +1,17 @@
+// @vitest-environment node
+
 import {
   sortAssets,
+  sortByMetadata,
   sortByName,
+  sortByPersonName,
   sortByDate,
   sortPeople,
-  sortPlaylists,
   sortProductions,
   sortTaskTypeScheduleItems,
   sortSequences,
   sortShots,
+  sortTaskNames,
   sortTaskTypes,
   sortTasks,
   sortValidationColumns, sortComments, sortRevisionPreviewFiles, sortAssetResult, sortShotResult
@@ -20,7 +24,25 @@ const taskTypeMap = new Map(Object.entries({
 }))
 
 describe('lib/sorting', () => {
-  beforeEach(() => {
+  it('sortByMetadata', () => {
+    const entries = [
+      { id: 1, data: { render_layer: 'fg' } },
+      { id: 2, data: {} },
+      { id: 3, data: { render_layer: 'bg' } }
+    ]
+    let results = [...entries].sort(
+      sortByMetadata({ column: 'render_layer', data_type: 'string' })
+    )
+    expect(results.map(entry => entry.id)).toEqual([3, 1, 2])
+
+    const numberEntries = [
+      { id: 1, data: { weight: '10' } },
+      { id: 2, data: { weight: '2' } }
+    ]
+    results = [...numberEntries].sort(
+      sortByMetadata({ column: 'weight', data_type: 'number' })
+    )
+    expect(results.map(entry => entry.id)).toEqual([2, 1])
   })
 
   it('sortByName', () => {
@@ -342,6 +364,20 @@ describe('lib/sorting', () => {
     expect(results).toHaveLength(0)
   })
 
+  it('sortTaskNames and sortTasks tolerate a task without entity names', () => {
+    // A task populated from a sequence loaded without full_name carries
+    // neither full_entity_name nor entity_name.
+    const build = () => [
+      { task_type_id: 'task-type-1', entity_name: 'Tree', priority: 0, id: 1 },
+      { task_type_id: 'task-type-1', priority: 0, id: 2 },
+      { task_type_id: 'task-type-1', entity_name: 'Chair', priority: 0, id: 3 }
+    ]
+    expect(sortTaskNames(build(), taskTypeMap).map(t => t.id)).toEqual([
+      2, 3, 1
+    ])
+    expect(sortTasks(build(), taskTypeMap).map(t => t.id)).toEqual([2, 3, 1])
+  })
+
   it('sortValidationColumns', () => {
     const production = {
       project_status_name: 'Open',
@@ -362,19 +398,6 @@ describe('lib/sorting', () => {
 
     results = sortValidationColumns([])
     expect(results).toHaveLength(0)
-  })
-
-  it('sortPlaylists', () => {
-    const entries = [
-      { id: 1, created_at: '2018-09-12-12:18:30', name: 'Playlist1' },
-      { id: 2, created_at: '2018-09-18-18:19:00', name: 'Playlist2' },
-      { id: 3, created_at: '2018-09-18-18:19:00', name: 'Playlist3' }
-    ]
-    const results = sortPlaylists(entries)
-    expect(results).toHaveLength(3)
-    expect(results[0].id).toEqual(2)
-    expect(results[1].id).toEqual(3)
-    expect(results[2].id).toEqual(1)
   })
 
   it('sortPeople', () => {
@@ -741,5 +764,47 @@ describe('lib/sorting', () => {
     expect(resultsTaskTypes[3].id).toEqual(3)
     expect(resultsTaskTypes[4].id).toEqual(1)
     expect(resultsTaskTypes[5].id).toEqual(2)
+  })
+
+  it('sortByPersonName', () => {
+    const personMap = new Map(
+      Object.entries({
+        'person-1': { id: 'person-1', name: 'Charlie' },
+        'person-2': { id: 'person-2', name: 'Alice' },
+        'person-3': { id: 'person-3', name: 'Bob' }
+      })
+    )
+
+    // sorts the ids in place, alphabetically by the person's name
+    const assignees = ['person-1', 'person-2', 'person-3']
+    const sorted = sortByPersonName(assignees, personMap)
+    expect(sorted).toBe(assignees)
+    expect(sorted).toEqual(['person-2', 'person-3', 'person-1'])
+
+    // ids missing from the map sink to the end instead of throwing, so
+    // assignees[0] keeps naming a person who resolved
+    const withMissing = ['person-1', 'missing', 'person-3']
+    expect(sortByPersonName(withMissing, personMap)).toEqual([
+      'person-3',
+      'person-1',
+      'missing'
+    ])
+
+    // an id that resolves always wins the first slot over one that does not
+    expect(sortByPersonName(['missing', 'person-1'], personMap)).toEqual([
+      'person-1',
+      'missing'
+    ])
+
+    // several holes keep the resolved names ordered ahead of them
+    expect(
+      sortByPersonName(['gone', 'person-1', 'missing', 'person-2'], personMap)
+    ).toEqual(['person-2', 'person-1', 'gone', 'missing'])
+
+    // nothing resolves: no throw, the list is left as is
+    expect(sortByPersonName(['gone', 'missing'], personMap)).toEqual([
+      'gone',
+      'missing'
+    ])
   })
 })

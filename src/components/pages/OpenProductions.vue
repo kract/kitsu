@@ -1,15 +1,17 @@
 <template>
   <div class="open-productions page">
     <div class="social-contributions" v-if="isContributions">
-      <h1 class="subtitle has-text-centered">
-        {{ $t('intro.title') }}
-      </h1>
       <div class="flexrow">
-        <img
-          class="flexrow-item kitsu-with-body"
-          src="../../assets/illustrations/kitsu-band.png"
-          alt=""
-        />
+        <div class="flexrow-item left-column">
+          <h1 class="subtitle">
+            {{ $t('intro.title') }}
+          </h1>
+          <img
+            class="kitsu-with-body"
+            src="../../assets/illustrations/kitsu-band.png"
+            alt=""
+          />
+        </div>
         <div class="filler">
           <span
             class="close-contributions"
@@ -24,40 +26,35 @@
           <p>
             {{ $t('intro.main') }}
           </p>
-          <ul>
-            <li>
-              {{ $t('intro.first') }}
-              <a href="https://github.com/cgwire/kitsu">GitHub</a>
-            </li>
-            <li>
-              {{ $t('intro.second') }}
-              <a href="https://x.com/cgwirekitsu">X</a>
-              {{ $t('main.or') }}
-              <a href="https://www.linkedin.com/company/cgwire/">LinkedIn</a>
-            </li>
-            <li>
-              {{ $t('intro.third') }}
-              <a href="https://discord.gg/VbCxtKN">Discord</a>
-            </li>
-            <li>
-              {{ $t('intro.four') }}
-              <a href="https://cgwire.canny.io">Canny</a>
-            </li>
-            <li>
-              {{ $t('intro.five') }}
-              <a href="https://liberapay.com/CGWire/donate">Liberapay</a>
-            </li>
-            <li>
-              {{ $t('intro.six') }}
-              <a href="https://cg-wire.com/pricing">offers</a>
-            </li>
-            <li>
-              {{ $t('intro.seven') }}
-            </li>
-          </ul>
-          <p>
-            {{ $t('intro.eight') }}
-          </p>
+          <div class="cta-list">
+            <a
+              class="cta cta-github"
+              href="https://github.com/cgwire/kitsu"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <star-icon :size="18" />
+              {{ $t('intro.star_github') }}
+            </a>
+            <a
+              class="cta cta-discord"
+              href="https://discord.gg/kitsu-community"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <message-circle-icon :size="18" />
+              {{ $t('intro.join_discord') }}
+            </a>
+            <a
+              class="cta cta-partner"
+              href="https://cg-wire.com/partners"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <handshake-icon :size="18" />
+              {{ $t('intro.join_partner') }}
+            </a>
+          </div>
         </div>
       </div>
     </div>
@@ -86,7 +83,7 @@
     >
       <div class="flexrow search-area" v-if="openProductions.length > 6">
         <search-field
-          ref="search-field"
+          ref="searchField"
           class="search-field ml1"
           @change="onSearchChange"
           v-focus
@@ -132,7 +129,7 @@
 
     <div class="has-text-centered welcome" v-else>
       <p class="kitsu-logo info">
-        <img src="../../assets/illustrations/empty_production.png" alt="" />
+        <img src="../../assets/illustrations/empty_list.png" alt="" />
       </p>
       <div v-if="isCurrentUserAdmin">
         <p class="has-text-centered info">
@@ -158,157 +155,154 @@
   </div>
 </template>
 
-<script>
-import { XIcon } from 'lucide-vue-next'
-import { mapGetters } from 'vuex'
+<script setup>
+import { useHead } from '@unhead/vue'
+import {
+  HandshakeIcon,
+  MessageCircleIcon,
+  StarIcon,
+  XIcon
+} from 'lucide-vue-next'
+import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
+import { useStore } from 'vuex'
 
-import { buildNameIndex } from '@/lib/indexing'
 import colors from '@/lib/colors'
+import { buildNameIndex } from '@/lib/indexing'
 import preferences from '@/lib/preferences'
 
 import SearchField from '@/components/widgets/SearchField.vue'
 import Spinner from '@/components/widgets/Spinner.vue'
 
-export default {
-  name: 'open-productions',
+// Composables
+// --------------------------------------------------------------------------
 
-  components: {
-    SearchField,
-    Spinner,
-    XIcon
-  },
+const { t } = useI18n()
+const router = useRouter()
+const store = useStore()
 
-  data() {
-    return {
-      isContributions: false,
-      filteredProductions: []
-    }
-  },
+// State
+// --------------------------------------------------------------------------
 
-  mounted() {
-    this.filteredProductions = this.openProductions
-    this.productionIndex = buildNameIndex(this.openProductions)
-    this.isContributions =
-      this.mainConfig.is_self_hosted &&
-      preferences.getPreference('open-productions:contributions') !== 'false'
-  },
+const searchFieldRef = useTemplateRef('searchField')
 
-  computed: {
-    ...mapGetters([
-      'isCurrentUserAdmin',
-      'isCurrentUserManager',
-      'isCurrentUserClient',
-      'isOpenProductionsLoading',
-      'lastProductionScreen',
-      'mainConfig',
-      'openProductions'
-    ])
-  },
+const filteredProductions = ref([])
+const isContributions = ref(false)
 
-  methods: {
-    generateAvatar(production) {
-      const firstLetter = production.name?.[0] || 'P'
-      return firstLetter.toUpperCase()
-    },
+// The index is only read on search, it does not need to be reactive.
+let productionIndex = {}
 
-    getAvatarColor(production) {
-      return colors.fromString(production.name)
-    },
+// Computed
+// --------------------------------------------------------------------------
 
-    getPath(production) {
-      return this.sectionPath(production, this.lastProductionScreen)
-    },
+const isCurrentUserAdmin = computed(() => store.getters.isCurrentUserAdmin)
+const isCurrentUserClient = computed(() => store.getters.isCurrentUserClient)
+const isCurrentUserManager = computed(() => store.getters.isCurrentUserManager)
+const isOpenProductionsLoading = computed(
+  () => store.getters.isOpenProductionsLoading
+)
+const lastProductionScreen = computed(() => store.getters.lastProductionScreen)
+const mainConfig = computed(() => store.getters.mainConfig)
+const openProductions = computed(() => store.getters.openProductions)
 
-    sectionPath(production, section) {
-      const routeName = this.isCurrentUserClient
-        ? 'playlists'
-        : production.homepage || section
-      const route = {
-        name: routeName,
-        params: {
-          production_id: production.id
-        },
-        query: {}
-      }
-      if (production.production_type === 'tvshow') {
-        if (routeName !== 'episodes') {
-          route.name = `episode-${routeName}`
-        }
-        if (
-          !['edits', 'episodes'].includes(routeName) &&
-          production.first_episode_id
-        ) {
-          route.params.episode_id = production.first_episode_id
-        } else {
-          route.params.episode_id = 'all'
-        }
-      } else if (
-        production.production_type === 'shots' &&
-        routeName === 'assets'
-      ) {
-        route.name = 'shots'
-      } else if (
-        production.production_type === 'assets' &&
-        ['shots', 'sequences'].includes(routeName)
-      ) {
-        route.name = 'assets'
-      }
-      const isEntityPage = [
-        'assets',
-        'shots',
-        'edits',
-        'sequences',
-        'episodes'
-      ].includes(routeName)
-      if (isEntityPage) {
-        route.query.search = ''
-      }
-      return route
-    },
+// Functions
+// --------------------------------------------------------------------------
 
-    getThumbnailPath(production) {
-      const lastUpdate = production.updated_at || production.created_at
-      const timestamp = Date.parse(lastUpdate)
-      return `/api/pictures/thumbnails/projects/${production.id}.png?t=${timestamp}`
-    },
+const generateAvatar = production => (production.name?.[0] || 'P').toUpperCase()
 
-    newProductionPage() {
-      this.$router.push({
-        name: 'new-production'
-      })
-    },
+const getAvatarColor = production => colors.fromString(production.name)
 
-    onSearchChange(search) {
-      if (search === '') {
-        this.filteredProductions = this.openProductions
-      } else {
-        this.filteredProductions = this.productionIndex[search]
-      }
-    },
-
-    hideContributions() {
-      this.isContributions = false
-      preferences.setPreference('open-productions:contributions', false)
-    }
-  },
-
-  watch: {
-    openProductions() {
-      if (this.openProductions.length > 6) {
-        const searchQuery = this.$refs['search-field']?.getValue() || ''
-        this.onSearchChange(searchQuery)
-      } else {
-        this.filteredProductions = this.openProductions
-      }
-    }
-  },
-
-  head() {
-    return {
-      title: `${this.$t('productions.home.title')} - Kitsu`
-    }
-  }
+const getThumbnailPath = production => {
+  const lastUpdate = production.updated_at || production.created_at
+  const timestamp = Date.parse(lastUpdate)
+  return `/api/pictures/thumbnails/projects/${production.id}.png?t=${timestamp}`
 }
+
+const getPath = production => {
+  const routeName = isCurrentUserClient.value
+    ? 'playlists'
+    : production.homepage || lastProductionScreen.value
+  const route = {
+    name: routeName,
+    params: {
+      production_id: production.id
+    },
+    query: {}
+  }
+  if (production.production_type === 'tvshow') {
+    if (routeName !== 'episodes') {
+      route.name = `episode-${routeName}`
+    }
+    if (
+      !['edits', 'episodes'].includes(routeName) &&
+      production.first_episode_id
+    ) {
+      route.params.episode_id = production.first_episode_id
+    } else {
+      route.params.episode_id = 'all'
+    }
+  } else if (production.production_type === 'shots' && routeName === 'assets') {
+    route.name = 'shots'
+  } else if (
+    production.production_type === 'assets' &&
+    ['shots', 'sequences'].includes(routeName)
+  ) {
+    route.name = 'assets'
+  }
+  const isEntityPage = [
+    'assets',
+    'shots',
+    'edits',
+    'sequences',
+    'episodes'
+  ].includes(routeName)
+  if (isEntityPage) {
+    route.query.search = ''
+  }
+  return route
+}
+
+const newProductionPage = () => {
+  router.push({ name: 'new-production' })
+}
+
+const onSearchChange = search => {
+  filteredProductions.value = search
+    ? productionIndex[search]
+    : openProductions.value
+}
+
+const hideContributions = () => {
+  isContributions.value = false
+  preferences.setPreference('open-productions:contributions', false)
+}
+
+// Watchers
+// --------------------------------------------------------------------------
+
+watch(
+  openProductions,
+  () => {
+    productionIndex = buildNameIndex(openProductions.value)
+    onSearchChange(searchFieldRef.value?.getValue() || '')
+  },
+  { immediate: true }
+)
+
+// Lifecycle
+// --------------------------------------------------------------------------
+
+onMounted(() => {
+  isContributions.value =
+    mainConfig.value.is_self_hosted &&
+    preferences.getPreference('open-productions:contributions') !== 'false'
+})
+
+// Head
+// --------------------------------------------------------------------------
+
+useHead({ title: computed(() => `${t('productions.home.title')} - Kitsu`) })
 </script>
 
 <style lang="scss" scoped>
@@ -489,21 +483,86 @@ a.secondary:hover {
     color: $green;
   }
 
-  ul {
-    margin-bottom: 1em;
-    margin-top: 1em;
+  .left-column {
+    align-items: center;
+    display: flex;
+    flex-direction: column;
+    gap: 1em;
+    margin-right: 2em;
+
+    .subtitle {
+      margin-bottom: 0;
+      text-align: center;
+    }
+  }
+
+  .filler {
+    padding: 1em 2em;
+  }
+
+  .cta-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8em;
+    margin-top: 1.5em;
+    max-width: 400px;
+  }
+
+  .cta {
+    align-items: center;
+    background: var(--background-alt-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    display: flex;
+    font-weight: 500;
+    gap: 0.8em;
+    padding: 0.8em 1.2em;
+    transition: all 0.2s ease-in-out;
+
+    svg {
+      color: var(--accent);
+    }
+
+    &:hover {
+      border-color: var(--accent);
+      transform: translateX(4px);
+    }
+  }
+
+  .cta-github {
+    --accent: #{$yellow};
+  }
+
+  .cta-discord {
+    --accent: #{$blue};
+  }
+
+  .cta-partner {
+    --accent: #{$green};
   }
 
   .close-contributions {
+    align-items: center;
+    border-radius: 50%;
+    color: var(--text-alt);
     cursor: pointer;
+    display: flex;
+    height: 28px;
+    justify-content: center;
     position: absolute;
-    right: 30px;
+    right: 15px;
     top: 15px;
-    width: 2px;
+    transition: all 0.2s ease-in-out;
+    width: 28px;
+
+    &:hover {
+      background: var(--background-alt);
+      color: var(--text);
+    }
   }
 
   .kitsu-with-body {
-    margin-right: 2em;
     width: 320px;
   }
 }

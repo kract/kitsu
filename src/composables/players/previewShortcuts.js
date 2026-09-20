@@ -56,7 +56,45 @@ export const isAltLetter = (event, code, key) => {
 }
 
 /**
+ * Classify a Ctrl/Cmd + Z / Y press as the browser's undo or redo command.
+ *
+ * Both must be swallowed wherever a player owns the keyboard: left alone,
+ * Chromium replays the last edit made in a text field of the page (its undo
+ * stack belongs to the frame, not to the focused element), which rewrites a
+ * list search field or a comment draft behind the user's back.
+ *
+ * Shift uppercases event.key, and Windows binds redo to Ctrl+Y as well; both
+ * are reported as redo so callers can swallow them without acting, redo living
+ * on Alt+R. Cmd+Y is excluded: on macOS it opens the browser history and has
+ * no redo meaning. Letter matching follows isAltLetter: event.key first so the
+ * shortcut stays on the printed cap across Latin layouts (AZERTY, QWERTZ,
+ * BÉPO), event.code only when event.key is not a plain a-z letter, which is
+ * the non-Latin case where the physical position is the sole usable signal.
+ *
+ * Exported so both keydown handlers (usePreviewShortcuts and
+ * SharedPlaylistPlayer) match alike.
+ *
+ * @param {KeyboardEvent} event
+ * @returns {'undo'|'redo'|null}
+ */
+export const undoRedoCommand = event => {
+  if (!event.ctrlKey && !event.metaKey) return null
+  const typed = event.key?.length === 1 ? event.key.toLowerCase() : null
+  const letter =
+    typed && typed >= 'a' && typed <= 'z'
+      ? typed
+      : { KeyZ: 'z', KeyY: 'y' }[event.code]
+  if (letter === 'z') return event.shiftKey ? 'redo' : 'undo'
+  // Ctrl+Y is the Windows redo. Cmd+Y is not its macOS counterpart, it opens
+  // the browser history, so it is left alone.
+  return letter === 'y' && event.ctrlKey ? 'redo' : null
+}
+
+/**
  * @param {Object} handlers
+ * @param {Function} [handlers.isActive] - return false to ignore shortcuts
+ *   while another player owns them (two players can be mounted at once:
+ *   the playlist modal above a task page's preview player)
  * @param {Function} [handlers.onDelete]
  * @param {Function} [handlers.onPrevFrame]
  * @param {Function} [handlers.onNextFrame]
@@ -85,6 +123,9 @@ export const usePreviewShortcuts = handlers => {
   const isAltHeld = ref(false)
 
   const onKeyDown = event => {
+    // Both players register on window; without this, Ctrl+Z or d/e on
+    // the visible player also mutated the hidden one's canvas.
+    if (handlers.isActive && !handlers.isActive()) return
     if (event.repeat && !REPEATABLE_KEYS.includes(event.key)) return
     // Alt+P plays/pauses even when an <input> / <textarea> has focus, so
     // users can pause / resume while typing a comment without leaving the
@@ -119,6 +160,14 @@ export const usePreviewShortcuts = handlers => {
     if (isAltLetter(event, 'KeyO', 'o')) {
       pauseEvent(event)
       handlers.onToggleOverlay?.()
+      return
+    }
+
+    // Undo and its redo siblings — matching rules live in undoRedoCommand.
+    const undoRedo = undoRedoCommand(event)
+    if (undoRedo) {
+      pauseEvent(event)
+      if (undoRedo === 'undo') handlers.onUndo?.()
       return
     }
 
@@ -158,15 +207,18 @@ export const usePreviewShortcuts = handlers => {
         handlers.onNextAnnotation?.()
         break
       case 'd':
-        pauseEvent(event)
-        handlers.onAnnotate?.()
+        // Bare-key tool toggles: leave Ctrl+D (bookmark) / Ctrl+E and
+        // the Alt combos to the browser and other handlers.
+        if (!alt && !mod) {
+          pauseEvent(event)
+          handlers.onAnnotate?.()
+        }
         break
       case 'e':
-        pauseEvent(event)
-        handlers.onErase?.()
-        break
-      case 'z':
-        if (mod) handlers.onUndo?.()
+        if (!alt && !mod) {
+          pauseEvent(event)
+          handlers.onErase?.()
+        }
         break
       case 'c':
         if (mod) handlers.onCopy?.()
@@ -184,14 +236,22 @@ export const usePreviewShortcuts = handlers => {
     }
   }
 
+  // Alt+Tab away swallows the keyup: without this reset the overlay
+  // stays pointer-transparent after coming back until Alt is tapped.
+  const onWindowBlur = () => {
+    isAltHeld.value = false
+  }
+
   onMounted(() => {
     window.addEventListener('keydown', onKeyDown, false)
     window.addEventListener('keyup', onKeyUp, false)
+    window.addEventListener('blur', onWindowBlur)
   })
 
   onBeforeUnmount(() => {
     window.removeEventListener('keydown', onKeyDown)
     window.removeEventListener('keyup', onKeyUp)
+    window.removeEventListener('blur', onWindowBlur)
   })
 
   return { isAltHeld }

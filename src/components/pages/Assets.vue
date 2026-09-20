@@ -19,14 +19,14 @@
               @click="modals.isBuildFilterDisplayed = true"
             />
             <div class="flexrow-item filler"></div>
-            <div class="flexrow flexrow-item" v-if="!isCurrentUserClient">
+            <div class="flexrow flexrow-item">
               <combobox-department
                 class="combobox-department flexrow-item"
                 :selectable-departments="selectableDepartments('Asset')"
                 :display-all-and-my-departments="true"
                 rounded
                 v-model="selectedDepartment"
-                v-if="departments.length > 0"
+                v-if="departments.length > 0 && !isCurrentUserClient"
               />
               <combobox-display-options
                 class="flexrow-item"
@@ -57,7 +57,7 @@
               />
               <button-simple
                 class="flexrow-item"
-                :text="$t('assets.new_asset')"
+                :text="$t('assets.new_assets')"
                 icon="plus"
                 @click="showNewModal"
               />
@@ -69,6 +69,7 @@
               :is-group-enabled="true"
               :queries="productionAssetSearchQueries"
               type="asset"
+              :production-id="currentProduction?.id"
               @remove-search="removeSearchQuery"
             />
           </div>
@@ -257,7 +258,7 @@ import moment from 'moment'
 import { mapGetters, mapActions } from 'vuex'
 
 import csv from '@/lib/csv'
-import { sortByName } from '@/lib/sorting'
+import { getExportDescriptors } from '@/lib/descriptors'
 import stringHelpers from '@/lib/string'
 
 import { searchMixin } from '@/components/mixins/search'
@@ -430,6 +431,7 @@ export default {
     } else {
       if (!this.isAssetsLoading) this.initialLoading = false
       finalize()
+      this.reloadEpisodeAssetsIfNeeded()
     }
   },
 
@@ -444,6 +446,7 @@ export default {
       'assetsPath',
       'assetListScrollPosition',
       'assetsCsvFormData',
+      'assetsLoadingKey',
       'assetSearchText',
       'assetSorting',
       'assetTypes',
@@ -461,7 +464,6 @@ export default {
       'isAssetsLoading',
       'isAssetsLoadingError',
       'isCurrentUserClient',
-      'isCurrentUserManager',
       'isTVShow',
       'isAssetResolution',
       'openProductions',
@@ -472,6 +474,9 @@ export default {
       'userFilters',
       'userFilterGroups'
     ]),
+    ...mapGetters({
+      isCurrentUserManager: 'isCurrentUserProductionManager'
+    }),
 
     productionAssetSearchQueries() {
       const productionId = this.currentProduction?.id
@@ -545,6 +550,7 @@ export default {
       this.productionAssetTaskTypes.forEach(item => {
         collection.push(item.name)
         collection.push(`${item.name} comment`)
+        collection.push(`${item.name} assignations`)
       })
 
       return collection
@@ -776,11 +782,11 @@ export default {
           this.$t('assets.fields.description'),
           this.$t('assets.fields.ready_for')
         ])
-        sortByName([...this.currentProduction.descriptors])
-          .filter(d => d.entity_type === 'Asset')
-          .forEach(descriptor => {
+        getExportDescriptors(this.currentProduction, 'Asset').forEach(
+          descriptor => {
             headers.push(descriptor.name)
-          })
+          }
+        )
         if (this.isAssetTime) {
           headers.push(this.$t('assets.fields.time_spent'))
         }
@@ -791,8 +797,11 @@ export default {
           headers.push(this.$t('shots.fields.resolution'))
         }
         this.assetValidationColumns.forEach(taskTypeId => {
-          headers.push(this.taskTypeMap.get(taskTypeId).name)
-          headers.push('Assignations')
+          const taskTypeName = this.taskTypeMap.get(taskTypeId)?.name || ''
+          headers.push(taskTypeName)
+          // Qualified by the task type so a re-import can tell the columns
+          // apart: bare duplicated headers collapse in the server's reader.
+          headers.push(`${taskTypeName} assignations`)
         })
         csv.buildCsvFile(name, [headers].concat(assetLines))
       })
@@ -833,13 +842,34 @@ export default {
       if (this.resetTimeout) clearTimeout(this.resetTimeout)
       this.resetTimeout = setTimeout(() => {
         this.resetTimeout = null
-        if (this.isAssetsLoading) return
+        // No bail while a load runs: the store queues the new scope behind the
+        // in-flight one, where returning would drop the episode switch.
         this.initialLoading = true
         this.loadAssets().then(() => {
           this.initialLoading = false
           this.applySearchFromUrl()
         })
       }, 50)
+    },
+
+    // The topbar sets the current episode before this page instance exists, so
+    // the currentEpisode watcher below cannot fire on a fresh mount: without
+    // this check the cache of the episode left behind is displayed as is.
+    reloadEpisodeAssetsIfNeeded() {
+      const scope = this.isTVShow ? (this.currentEpisode?.id ?? '') : ''
+      if (
+        !this.currentProduction ||
+        this.assetsLoadingKey === `${this.currentProduction.id}/${scope}`
+      ) {
+        return
+      }
+      this.$refs['asset-search-field']?.setValue('')
+      this.$store.commit('SET_ASSET_LIST_SCROLL_POSITION', 0)
+      this.initialLoading = true
+      this.loadAssets().then(() => {
+        this.initialLoading = false
+        this.applySearchFromUrl()
+      })
     }
   },
 
@@ -859,18 +889,7 @@ export default {
     },
 
     currentSection() {
-      if (
-        this.isTVShow &&
-        this.currentEpisode?.id &&
-        !this.displayedAssets.find(
-          asset => asset.episode_id === this.currentEpisode.id
-        )
-      ) {
-        this.searchField.setValue('')
-        this.$store.commit('SET_ASSET_LIST_SCROLL_POSITION', 0)
-        this.initialLoading = true
-        this.reset()
-      }
+      this.reloadEpisodeAssetsIfNeeded()
     }
   },
 

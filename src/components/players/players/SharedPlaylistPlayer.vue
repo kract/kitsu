@@ -43,7 +43,6 @@
             :full-screen="false"
             :light="false"
             :margin-bottom="0"
-            :panzoom="true"
             :preview="currentPreview"
             :url-prefix="sharedApiPrefix"
             high-quality
@@ -99,6 +98,7 @@
           </div>
 
           <shared-annotation-overlay
+            ref="annotationOverlay"
             :annotations="currentAnnotations"
             :current-frame="currentFrameNumber"
             :frame-duration="frameDuration"
@@ -194,11 +194,8 @@
       :entity-list="entityListForProgress"
       :fps="fps"
       :frame-duration="frameDuration"
-      :is-full-mode="false"
       :is-full-screen="false"
-      :movie-dimensions="movieDimensions"
       :nb-frames="nbFrames"
-      :preview-id="currentPreview ? currentPreview.id : ''"
       :playlist-duration="playlistDuration"
       :playlist-progress="currentPlaylistProgress"
       :playlist-shot-position="playlistShotPosition"
@@ -219,7 +216,7 @@
       <div
         class="flexrow-item has-text-centered playlisted-wrapper"
         :data-entity-index="index"
-        :key="entity.id || index"
+        :key="entity.id ? `${entity.id}-${entity.preview_file_id}` : index"
         v-for="(entity, index) in entityList"
       >
         <playlisted-entity
@@ -251,7 +248,10 @@ import { useStore } from 'vuex'
 import darkTimesliderUrl from '@/assets/background/video-timeslider-dark.png'
 import { usePanzoomSync } from '@/composables/panzoom'
 import { useMediaKind } from '@/composables/players/mediaKind'
-import { isAltLetter } from '@/composables/players/previewShortcuts'
+import {
+  isAltLetter,
+  undoRedoCommand
+} from '@/composables/players/previewShortcuts'
 import { usePlayerTransport } from '@/composables/players/transport'
 import { mergeAnnotationsByFrame } from '@/lib/players/annotation'
 import { DEFAULT_FPS, floorToFrame, formatTime } from '@/lib/video'
@@ -292,6 +292,7 @@ const emit = defineEmits(['logout'])
 const { panzoomTransform, onPanzoomChanged, resetPanzoomTransform } =
   usePanzoomSync()
 
+const annotationOverlay = ref(null)
 const container = ref(null)
 const videoContainer = ref(null)
 // Height available for the picture viewer: it must fill the same area the
@@ -738,7 +739,10 @@ const onProgressPlaylistChanged = frameNumber => {
   const position = playlistShotPosition.value[frameNumber]
   if (!position) return
   const { index, start } = position
-  const localFrame = Math.round(frameNumber - start * fps.value)
+  // start carries the strip's +1 slot convention ((firstGlobalFrame + 1)
+  // / fps): compensate like the studio player, or every strip click
+  // seeks one frame early.
+  const localFrame = Math.round(frameNumber - start * fps.value) + 1
   if (index !== playingEntityIndex.value) {
     selectEntity(index)
     nextTick(() => rawPlayer.value?.setCurrentFrame(Math.max(localFrame, 0)))
@@ -749,6 +753,12 @@ const onProgressPlaylistChanged = frameNumber => {
 
 const onPlayNext = () => {
   if (!isPlaying.value) return
+  // Repeat loops the current movie like the studio player; without this
+  // the toggle did nothing (the viewer's own trim loop is inactive here).
+  if (isRepeating.value && isMovie.value) {
+    rawPlayer.value?.playNext()
+    return
+  }
   // Step through sub-previews first, then the next entity (handles images
   // too, which MultiVideoViewer's own playNext would skip).
   advancePlaylist()
@@ -838,6 +848,19 @@ const onKeyDown = event => {
   const stop = () => {
     event.preventDefault()
     event.stopPropagation()
+  }
+
+  // Left unconsumed, the browser's own undo rewinds the guest's comment draft
+  // instead of the last stroke. Swallow every variant whatever the state, this
+  // player having no redo; only the undo itself needs an annotating overlay.
+  // Matching rules live in undoRedoCommand.
+  const undoRedo = undoRedoCommand(event)
+  if (undoRedo) {
+    stop()
+    if (undoRedo === 'undo' && isAnnotating.value) {
+      annotationOverlay.value?.undo()
+    }
+    return
   }
 
   // Entity navigation reuses isAltLetter (shared with usePreviewShortcuts)

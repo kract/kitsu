@@ -210,8 +210,9 @@
             <input
               id="input-revision"
               class="input flexrow-item column preview-revision"
+              :class="{ 'below-current': isRevisionBelowCurrent }"
               type="number"
-              :min="revision + 1"
+              :min="0"
               pattern="[0-9]"
               :placeholder="revision + 1"
               @enter="$emit('add-preview')"
@@ -330,6 +331,7 @@
             :task-status-list="taskStatus"
             :production-id="task.project_id"
             v-model="task_status_id"
+            v-if="!isStatusLocked"
           />
           <button-simple
             class="post-button"
@@ -370,6 +372,9 @@
         <div class="error pull-right" v-if="isMaxRetakesError">
           <em>{{ $t('comments.max_retakes_error') }}</em>
         </div>
+        <div class="error pull-right" v-if="errors.unknownStatus">
+          <em>{{ $t('comments.unknown_status_error') }}</em>
+        </div>
       </div>
     </div>
 
@@ -377,11 +382,10 @@
       ref="addAttachmentModalRef"
       :active="modals.addCommentAttachment"
       :is-loading="loading.addCommentAttachment"
-      :is-error="errors.addCommentAttachment"
       :is-movie="isMovie"
       :is-picture="isPicture"
       :title="`${task.entity_name} / ${
-        taskTypeMap.get(task.task_type_id).name
+        taskTypeMap.get(task.task_type_id)?.name || ''
       }`"
       :name-prefix="attachmentNamePrefix"
       @cancel="onCloseCommentAttachment"
@@ -477,6 +481,13 @@ const props = defineProps({
     type: Boolean,
     default: null
   },
+  // Set for someone who is in the conversation only because they were
+  // mentioned: they may answer, but the status stays where the assignees
+  // left it. The API enforces the same rule.
+  isStatusLocked: {
+    type: Boolean,
+    default: false
+  },
   task: {
     type: Object,
     default: () => {}
@@ -500,10 +511,6 @@ const props = defineProps({
   revision: {
     type: Number,
     default: 1
-  },
-  time: {
-    type: Number,
-    default: 0
   },
   previewForms: {
     type: Array,
@@ -538,7 +545,8 @@ const { membersForAts, atOptionsFilter } = useAtMentionsMembers(
 const isFrameAddition = ref(false)
 const isDragging = ref(false)
 const errors = reactive({
-  addCommentAttachment: false
+  addCommentAttachment: false,
+  unknownStatus: false
 })
 const loading = reactive({
   addCommentAttachment: false
@@ -548,9 +556,19 @@ const modals = reactive({
   confirmFeedbackPublish: false
 })
 
+const isCurrentUserAdmin = computed(() => store.getters.isCurrentUserAdmin)
 const isCurrentUserArtist = computed(() => store.getters.isCurrentUserArtist)
 const isCurrentUserClient = computed(() => store.getters.isCurrentUserClient)
-const isCurrentUserManager = computed(() => store.getters.isCurrentUserManager)
+// Resolved against the commented task, not currentProduction: this widget
+// is hosted by TaskInfo, which can be shown outside a matching production
+// route (Todos, MyChecks, ...).
+const isCurrentUserManager = computed(() =>
+  props.task?.project_id
+    ? isCurrentUserAdmin.value ||
+      store.getters.currentUserRoleForProduction(props.task.project_id) ===
+        'manager'
+    : store.getters.isCurrentUserManager
+)
 const forClient = ref(false)
 const productionMap = computed(() => store.getters.productionMap)
 const taskStatusForCurrentUser = computed(
@@ -671,11 +689,20 @@ const isValidForm = computed(() => {
     (mode.value === 'publish' &&
       props.previewForms.length &&
       (nextRevision.value === undefined ||
-        nextRevision.value > props.revision) &&
+        nextRevision.value === '' ||
+        nextRevision.value > -1) &&
       (!showLinkField.value ||
         !link.value ||
         inputLinkRef.value?.checkValidity()))
   )
+})
+
+// Warn (without blocking) when the chosen revision is not greater than
+// the current one: allowed since revision 0 is valid, but worth flagging.
+const isRevisionBelowCurrent = computed(() => {
+  const value = nextRevision.value
+  if (value === undefined || value === '') return false
+  return Number(value) <= props.revision
 })
 
 const shortenText = strings.shortenText
@@ -704,7 +731,20 @@ const runAddComment = (
   if (!isValidForm.value) {
     return
   }
+  if (props.isStatusLocked) {
+    // The selector is hidden in this mode, so nothing could have moved the
+    // status. Re-read it from the task anyway: the API rejects a comment
+    // that carries any other one.
+    task_status_id.value = props.task.task_status_id
+  }
+  // A status id that no longer resolves usually means a stale cache, so tell
+  // the user to reload rather than posting a comment with no status.
   const taskStatus = taskStatusMap.value.get(task_status_id.value)
+  if (!taskStatus) {
+    errors.unknownStatus = true
+    return
+  }
+  errors.unknownStatus = false
   if (
     taskStatus.is_feedback_request &&
     props.previewForms.length === 0 &&
@@ -733,9 +773,13 @@ const runAddComment = (
     checklistVal = checklistVal.filter(item => item.text)
   }
 
-  revisionVal = Number(revisionVal)
-  if (isNaN(revisionVal) || revisionVal < 1) {
+  if (revisionVal === '' || revisionVal === undefined) {
     revisionVal = undefined
+  } else {
+    revisionVal = Number(revisionVal)
+    if (isNaN(revisionVal) || revisionVal < 0) {
+      revisionVal = undefined
+    }
   }
 
   if (!showLinkField.value) {
@@ -795,10 +839,14 @@ const onInsertChecklistItem = item => {
 }
 
 const resetStatus = () => {
+  if (props.isStatusLocked) {
+    task_status_id.value = props.task.task_status_id
+    return
+  }
   const taskStatus = taskStatusMap.value.get(props.task.task_status_id)
   if (
-    (!isCurrentUserArtist.value || taskStatus.is_artist_allowed) &&
-    (!isCurrentUserClient.value || taskStatus.is_client_allowed)
+    (!isCurrentUserArtist.value || taskStatus?.is_artist_allowed) &&
+    (!isCurrentUserClient.value || taskStatus?.is_client_allowed)
   ) {
     task_status_id.value = props.task.task_status_id
   } else {
@@ -1014,7 +1062,7 @@ watch(isFrameAddition, value => {
 watch(
   () => props.previewForms,
   () => {
-    const form = props.previewForms?.findLast(form => getRevision(form) > 0)
+    const form = props.previewForms?.findLast(form => getRevision(form) > -1)
     nextRevision.value = getRevision(form)
   },
   { deep: true, immediate: true }
@@ -1076,6 +1124,11 @@ article.add-comment {
 
 .preview-revision {
   max-width: 30%;
+
+  &.below-current {
+    border-color: $red;
+    color: $red;
+  }
 }
 
 .preview-delete-link,

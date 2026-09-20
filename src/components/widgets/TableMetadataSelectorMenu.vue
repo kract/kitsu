@@ -103,7 +103,11 @@ const props = defineProps({
   modelValue: { type: Object, required: true },
   namespace: { type: String, required: true },
   externalReorder: { type: Function, default: null },
-  isOpen: { type: Boolean, default: false }
+  isOpen: { type: Boolean, default: false },
+  // Production the displayed columns belong to. Left unset by
+  // cross-production consumers (ProductionList.vue), which keep the
+  // global role.
+  productionId: { type: String, default: null }
 })
 
 const emit = defineEmits(['update:model-value', 'update:is-open'])
@@ -117,19 +121,34 @@ const sortedMetadataDescriptors = ref([])
 // Computed
 
 const FIELD_TO_NAME = computed(() => ({
+  difficulty: t('tasks.fields.difficulty'),
+  doneDate: t('tasks.fields.done_date'),
+  dueDate: t('tasks.fields.due_date'),
+  duration: t('tasks.fields.duration'),
   estimation: t('main.estimation'),
   fps: t('main.fps'),
   frameIn: t('main.frame_in'),
   frameOut: t('main.frame_out'),
   frames: t('main.frames'),
+  lastCommentDate: t('tasks.fields.last_comment_date'),
   maxRetakes: t('shots.fields.max_retakes'),
   readyFor: t('assets.fields.ready_for'),
+  realEndDate: t('tasks.fields.real_end_date'),
+  realStartDate: t('tasks.fields.real_start_date'),
   resolution: t('shots.fields.resolution'),
+  retakeCount: t('tasks.fields.retake_count'),
+  startDate: t('tasks.fields.start_date'),
   stdby: t('breakdown.fields.standby'),
   timeSpent: t('main.timeSpent')
 }))
 
-const isCurrentUserManager = computed(() => store.getters.isCurrentUserManager)
+const isCurrentUserManager = computed(() =>
+  props.productionId
+    ? store.getters.isCurrentUserAdmin ||
+      store.getters.currentUserRoleForProduction(props.productionId) ===
+        'manager'
+    : store.getters.isCurrentUserManager
+)
 
 const filteredFixedColumns = computed(() =>
   Object.keys(props.modelValue)

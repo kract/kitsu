@@ -111,11 +111,8 @@
         <div class="loading-skeleton" v-if="loading.notifications">
           <div
             class="skeleton-card"
-            :style="{
-              '--row-index': i - 1,
-              '--fadeout-delay': `${fadeoutDelayMs}ms`
-            }"
-            :key="`skeleton-${skeletonCycle}-${i}`"
+            :style="{ '--row-index': i - 1 }"
+            :key="`skeleton-${i}`"
             v-for="i in SKELETON_ROWS"
           ></div>
         </div>
@@ -372,7 +369,7 @@
     </div>
 
     <div class="column side-column is-hidden-mobile hide-small-screen">
-      <task-info :task="currentTask" :is-loading="loading.currentTask" />
+      <task-info :task="currentTask" />
     </div>
   </div>
 </template>
@@ -405,7 +402,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useStore } from 'vuex'
 
 import { useDesktopNotifications } from '@/composables/desktopNotifications'
-import { useSkeletonCycle } from '@/composables/skeleton'
 import {
   buildEntityRoute,
   buildPlaylistRoute,
@@ -448,9 +444,6 @@ const route = useRoute()
 const router = useRouter()
 const store = useStore()
 const instance = getCurrentInstance()
-const { cycle: skeletonCycle, fadeoutDelayMs } = useSkeletonCycle(
-  ref(SKELETON_ROWS)
-)
 const socket = instance.appContext.config.globalProperties.$socket
 const {
   permission: desktopNotificationsPermission,
@@ -484,7 +477,6 @@ const currentNotificationId = ref(null)
 
 const errors = reactive({ notifications: false })
 const loading = reactive({
-  currentTask: true,
   markAll: false,
   more: false,
   notifications: false
@@ -503,7 +495,7 @@ const parameters = reactive({
 
 const departmentMap = computed(() => store.getters.departmentMap)
 const notifications = computed(() => store.getters.notifications)
-const organisation = computed(() => store.getters.organisation)
+const organisationLogoPath = computed(() => store.getters.organisationLogoPath)
 const personMap = computed(() => store.getters.personMap)
 const productionMap = computed(() => store.getters.productionMap)
 const taskStatus = computed(() => store.getters.taskStatus)
@@ -512,7 +504,7 @@ const taskTypeMap = computed(() => store.getters.taskTypeMap)
 const user = computed(() => store.getters.user)
 
 const testNotificationPayload = computed(() =>
-  buildTestNotificationPayload(t, organisation.value)
+  buildTestNotificationPayload(t, organisationLogoPath.value)
 )
 
 const taskStatusList = computed(() => [
@@ -659,11 +651,9 @@ const onNotificationSelected = (event, notification) => {
     return
   }
   if (currentNotificationId.value !== notification.id) {
-    loading.currentTask = true
     store
       .dispatch('loadTask', { taskId: notification.task_id })
       .then(task => {
-        loading.currentTask = false
         currentTask.value = task
         currentNotificationId.value = notification.id
       })
@@ -928,10 +918,14 @@ a {
 }
 
 .skeleton-card {
+  // The pulse animates the same opacity as the entry animation, so it
+  // only starts once the 0.4s fade-in is over (its 0% frame matches the
+  // fade-in end value): no visible jump between the two.
   animation:
     skeleton-card-in 0.4s ease-out forwards,
-    skeleton-card-out 0.35s ease-in forwards;
-  animation-delay: calc(var(--row-index) * 150ms), var(--fadeout-delay);
+    skeleton-pulse 1.6s ease-in-out infinite;
+  animation-delay:
+    calc(var(--row-index) * 150ms), calc(var(--row-index) * 150ms + 0.4s);
   background: rgba(var(--skeleton-rgb), 0.45);
   border-radius: 1em;
   height: 72px;
@@ -953,12 +947,13 @@ a {
   }
 }
 
-@keyframes skeleton-card-out {
-  from {
+@keyframes skeleton-pulse {
+  0%,
+  100% {
     opacity: 1;
   }
-  to {
-    opacity: 0;
+  50% {
+    opacity: 0.4;
   }
 }
 

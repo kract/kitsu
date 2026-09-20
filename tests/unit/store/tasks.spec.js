@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { vi } from 'vitest'
 
 // Importing the tasks module transitively pulls in the root store
@@ -142,6 +144,55 @@ describe('Tasks store', () => {
       tasksStore.mutations.ADD_REPLY_TO_COMMENT({}, { comment, reply })
       expect(comment.replies[0].person.full_name).toEqual('Guest Author')
       expect(comment.replies[0].person.initials).toEqual('GA')
+    })
+
+    test('UPDATE_COMMENT_REPLIES resolves the realtime reply author', () => {
+      const state = {
+        taskComments: {
+          'task-1': [{ id: 'comment-studio', replies: [] }]
+        }
+      }
+      // The comment:reply payload carries person_id and no embedded author.
+      tasksStore.mutations.UPDATE_COMMENT_REPLIES(state, {
+        id: 'comment-studio',
+        object_id: 'task-1',
+        person_id: 'person-studio',
+        replies: [{ id: 'reply-studio', person_id: 'person-studio' }]
+      })
+      const [reply] = state.taskComments['task-1'][0].replies
+      expect(reply.person.full_name).toEqual('Studio Member (live)')
+      expect(reply.person.initials).toEqual('SM')
+    })
+
+    test('UPDATE_COMMENT_REPLIES ignores a comment absent from the store', () => {
+      const state = { taskComments: { 'task-1': [] } }
+      expect(() =>
+        tasksStore.mutations.UPDATE_COMMENT_REPLIES(state, {
+          id: 'comment-unknown',
+          object_id: 'task-1',
+          replies: []
+        })
+      ).not.toThrow()
+    })
+
+    test('UPDATE_COMMENT_CHECKLIST ignores a comment absent from the store', () => {
+      const state = { taskComments: { 'task-1': [] } }
+      expect(() =>
+        tasksStore.mutations.UPDATE_COMMENT_CHECKLIST(state, {
+          comment: { id: 'comment-unknown', object_id: 'task-1' },
+          checklist: []
+        })
+      ).not.toThrow()
+    })
+
+    test('ADD_ATTACHMENT_TO_COMMENT ignores an untracked task', () => {
+      const state = { taskComments: {} }
+      expect(() =>
+        tasksStore.mutations.ADD_ATTACHMENT_TO_COMMENT(state, {
+          comment: { id: 'comment-1', object_id: 'task-unknown' },
+          attachmentFiles: [{ id: 'file-1' }]
+        })
+      ).not.toThrow()
     })
   })
 
@@ -323,5 +374,99 @@ describe('Tasks store', () => {
         annotations
       })
     })
+  })
+
+  describe('SET_PREVIEW', () => {
+    // The socket event carries no task id, and the my-checks page renders the
+    // very objects registered here, so the whole map has to be swept.
+    test('refreshes every registered task of the entity', () => {
+      const acting = {
+        id: 'task-1',
+        entity_id: 'entity-1',
+        entity_preview_file_id: 'old',
+        entity: { id: 'entity-1', preview_file_id: 'old' }
+      }
+      const sibling = {
+        id: 'task-2',
+        entity_id: 'entity-1',
+        entity_preview_file_id: 'old'
+      }
+      const other = {
+        id: 'task-3',
+        entity_id: 'entity-2',
+        entity_preview_file_id: 'old'
+      }
+      const state = {
+        taskMap: new Map([
+          ['task-1', acting],
+          ['task-2', sibling],
+          ['task-3', other]
+        ])
+      }
+
+      tasksStore.mutations.SET_PREVIEW(state, {
+        entityId: 'entity-1',
+        previewId: 'preview-1'
+      })
+
+      expect(acting.entity_preview_file_id).toEqual('preview-1')
+      expect(acting.entity.preview_file_id).toEqual('preview-1')
+      expect(sibling.entity_preview_file_id).toEqual('preview-1')
+      expect(other.entity_preview_file_id).toEqual('old')
+    })
+
+    // The people module only refreshes the done tasks: the todo ones of the
+    // person page rely on being registered here, so pin that registration.
+    test('reaches the person todo tasks registered by LOAD_PERSON_TASKS_END', () => {
+      const task = {
+        id: 'task-1',
+        entity_id: 'entity-1',
+        entity_type_name: 'Shot',
+        entity_name: 'SH01',
+        project_id: 'project-1',
+        entity_preview_file_id: 'old'
+      }
+      const state = { taskMap: new Map() }
+
+      tasksStore.mutations.LOAD_PERSON_TASKS_END(state, { tasks: [task] })
+      expect(state.taskMap.get('task-1')).toBe(task)
+
+      tasksStore.mutations.SET_PREVIEW(state, {
+        entityId: 'entity-1',
+        previewId: 'preview-1'
+      })
+      expect(task.entity_preview_file_id).toEqual('preview-1')
+    })
+  })
+})
+
+describe('Tasks store, DELETE_TASK_END', () => {
+  const task = { id: 't1', entity_id: 'e1', task_type_id: 'tt1' }
+  const buildState = () => ({
+    taskComments: {},
+    taskPreviews: {},
+    taskMap: new Map([['t1', task]]),
+    selectedTasks: new Map(),
+    selectedValidations: new Map(),
+    nbSelectedTasks: 0,
+    nbSelectedValidations: 0
+  })
+
+  // A colleague's deletion reaches every open list: an empty cell selected
+  // behind the user's back would recreate the task on the next creation.
+  test('selects nothing when the deleted task was not selected', () => {
+    const state = buildState()
+    tasksStore.mutations.DELETE_TASK_END(state, task)
+    expect(state.selectedValidations.size).toBe(0)
+  })
+
+  test('keeps the empty cell of a selected task selected, and counted', () => {
+    const state = buildState()
+    state.selectedTasks.set('t1', task)
+    state.nbSelectedTasks = 1
+    tasksStore.mutations.DELETE_TASK_END(state, task)
+    expect(state.nbSelectedTasks).toBe(0)
+    expect(state.selectedValidations.has('e1-tt1')).toBe(true)
+    expect(state.nbSelectedValidations).toBe(1)
   })
 })

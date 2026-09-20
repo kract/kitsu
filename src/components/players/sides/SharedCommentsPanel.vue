@@ -131,6 +131,7 @@
           :is-replyable="false"
           :task-types="[]"
           :team="[]"
+          :url-prefix="'/api/shared/playlists/' + token"
           :revision="comment.revision || 1"
           :style="{ animationDelay: Math.min(index, 8) * 60 + 'ms' }"
           @edit-comment="onEditComment"
@@ -147,7 +148,6 @@
         <add-attachment-modal
           :active="modals.attachment"
           :is-loading="false"
-          :is-error="false"
           :is-movie="false"
           :title="entity?.name || ''"
           :name-prefix="attachmentNamePrefix"

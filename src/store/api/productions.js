@@ -33,6 +33,7 @@ export default {
   updateProduction(production) {
     const BOOLEAN_FIELDS = [
       'is_clients_isolated',
+      'is_frame_in_numbering',
       'is_preview_download_allowed',
       'is_set_preview_automated',
       'is_publish_default_for_artists',
@@ -61,6 +62,16 @@ export default {
   addPersonToTeam(productionId, personId) {
     const data = { person_id: personId }
     return client.ppost(`/api/data/projects/${productionId}/team`, data)
+  },
+
+  getTeam(productionId) {
+    return client.pget(`/api/data/projects/${productionId}/team`)
+  },
+
+  updateTeamMemberRole(productionId, personId, role) {
+    const data = { role }
+    const path = `/api/data/projects/${productionId}/team/${personId}`
+    return client.pput(path, data)
   },
 
   removePersonFromTeam(productionId, personId) {
@@ -161,6 +172,9 @@ export default {
       for_client: toBoolean(descriptor.for_client),
       entity_type: descriptor.entity_type,
       departments: descriptor.departments
+    }
+    if (descriptor.task_type_id) {
+      data.task_type_id = descriptor.task_type_id
     }
     return client.ppost(
       `/api/data/projects/${productionId}/metadata-descriptors`,

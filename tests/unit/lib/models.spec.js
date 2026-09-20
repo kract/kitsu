@@ -1,11 +1,13 @@
+// @vitest-environment node
+
 import {
   addToIdList,
   arrayMove,
   removeFromIdList,
   getFilledColumns,
   groupEntitiesByParents,
-  findModelInList,
   populateTask,
+  setTasksEntityPreview,
   updateModelFromList,
   removeModelFromList
 } from '@/lib/models'
@@ -101,17 +103,6 @@ describe('lib/helpers', () => {
     ])
   })
 
-  it('findModelInList', () => {
-    const items = [
-      { id: '1', name: 'item-1' },
-      { id: '2', name: 'item-2' },
-      { id: '3', name: 'item-3' }
-    ]
-    const model = { id: '2', name: 'item-2' }
-    expect(findModelInList(items, model)).toEqual(items[1])
-    expect(findModelInList(items, { id: '5' })).toEqual(undefined)
-  })
-
   it('updateModeFromList', () => {
     const items = [
       { id: '1', name: 'item-1' },
@@ -202,5 +193,38 @@ describe('lib/helpers', () => {
     const arr = ['a', 'b', 'c', 'd']
     expect(arrayMove(arr, 0, 2)).toEqual(['b', 'c', 'a', 'd'])
     expect(arr).toEqual(['a', 'b', 'c', 'd']) // original unchanged
+  })
+
+  describe('setTasksEntityPreview', () => {
+    const buildTasks = () => [
+      {
+        id: 'task-1',
+        entity_id: 'entity-1',
+        entity_preview_file_id: 'old',
+        entity: { id: 'entity-1', preview_file_id: 'old' }
+      },
+      // Same entity, another task type: its row must follow too.
+      { id: 'task-2', entity_id: 'entity-1', entity_preview_file_id: 'old' },
+      { id: 'task-3', entity_id: 'entity-2', entity_preview_file_id: 'old' }
+    ]
+
+    it('refreshes both preview fields of every task of the entity', () => {
+      const tasks = buildTasks()
+      setTasksEntityPreview(tasks, 'entity-1', 'preview-1')
+      expect(tasks[0].entity_preview_file_id).toEqual('preview-1')
+      expect(tasks[0].entity.preview_file_id).toEqual('preview-1')
+      expect(tasks[1].entity_preview_file_id).toEqual('preview-1')
+      expect(tasks[2].entity_preview_file_id).toEqual('old')
+    })
+
+    it('leaves the tasks alone without an entity id', () => {
+      const tasks = buildTasks()
+      setTasksEntityPreview(tasks, undefined, 'preview-1')
+      expect(tasks.map(t => t.entity_preview_file_id)).toEqual([
+        'old',
+        'old',
+        'old'
+      ])
+    })
   })
 })

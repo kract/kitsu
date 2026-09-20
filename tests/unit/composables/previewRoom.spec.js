@@ -10,7 +10,7 @@ const SOCKET_EVENTS = [
   'preview-room:comparison-panzoom-changed',
   'preview-room:add-annotation',
   'preview-room:remove-annotation',
-  'preview-update-annotation'
+  'preview-room:update-annotation'
 ]
 
 const makeSocket = () => ({
@@ -356,28 +356,15 @@ describe('composables/previewRoom', () => {
   })
 
   describe('socket lifecycle', () => {
-    it('registers all preview-room handlers on mount', () => {
+    it('registers each handler once and unregisters the same references on unmount', () => {
       const socket = makeSocket()
       const { wrapper } = mountWithRoom({
         room: makeRoom(),
         userId: 'user-1',
         socket
       })
+      // The Map below would fold a duplicate registration into one entry.
       expect(socket.on).toHaveBeenCalledTimes(SOCKET_EVENTS.length)
-      SOCKET_EVENTS.forEach(event => {
-        expect(socket.on).toHaveBeenCalledWith(event, expect.any(Function))
-      })
-      wrapper.unmount()
-    })
-
-    it('unregisters the same handler references on unmount', () => {
-      const socket = makeSocket()
-      const { wrapper } = mountWithRoom({
-        room: makeRoom(),
-        userId: 'user-1',
-        socket
-      })
-      // Capture handler refs registered with socket.on(...)
       const registered = new Map(socket.on.mock.calls)
       wrapper.unmount()
       expect(socket.off).toHaveBeenCalledTimes(SOCKET_EVENTS.length)
@@ -591,7 +578,7 @@ describe('composables/previewRoom', () => {
       wrapper.unmount()
     })
 
-    it("'preview-update-annotation' calls updateObjectInCanvas for remote events", () => {
+    it("'preview-room:update-annotation' calls updateObjectInCanvas for remote events", () => {
       const socket = makeSocket()
       const updateObjectInCanvas = vi.fn()
       const getAnnotation = vi.fn(() => ({ id: 'a' }))
@@ -602,11 +589,11 @@ describe('composables/previewRoom', () => {
         updateObjectInCanvas,
         getAnnotation
       })
-      const handler = handlerFor(socket, 'preview-update-annotation')
+      const handler = handlerFor(socket, 'preview-room:update-annotation')
       handler({
-        time: 1,
-        data: { local_id: 'other', obj: { id: 'x' } }
+        data: { local_id: 'other', obj: { id: 'x' }, time: 1 }
       })
+      expect(getAnnotation).toHaveBeenCalledWith(1)
       expect(updateObjectInCanvas).toHaveBeenCalledWith(
         { id: 'a' },
         { id: 'x' }

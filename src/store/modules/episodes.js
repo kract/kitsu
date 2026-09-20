@@ -6,6 +6,7 @@ import { getTaskTypePriorityOfProd } from '@/lib/productions'
 import { buildEpisodeIndex, indexSearch } from '@/lib/indexing'
 import {
   sortByName,
+  sortByPersonName,
   sortEpisodeResult,
   sortValidationColumns
 } from '@/lib/sorting'
@@ -34,7 +35,6 @@ import {
   REMOVE_EPISODE,
   REMOVE_EPISODE_SEARCH,
   REMOVE_SELECTED_TASK,
-  RESET_PRODUCTION_PATH,
   SET_CURRENT_EPISODE,
   SET_EPISODE_LIST_SCROLL_POSITION,
   SET_EPISODE_SELECTION,
@@ -104,7 +104,7 @@ const helpers = {
     ).toString()
     task.task_status_short_name = taskStatusMap.get(
       task.task_status_id
-    ).short_name
+    )?.short_name
 
     const episodeName = episode.name
     Object.assign(task, {
@@ -127,8 +127,9 @@ const helpers = {
     episodes
       .filter(e => !e.canceled)
       .forEach(episode => {
-        timeSpent += episode.timeSpent
-        estimation += episode.estimation
+        // An episode added or created live carries no totals yet.
+        timeSpent += episode.timeSpent || 0
+        estimation += episode.estimation || 0
       })
     Object.assign(state, {
       displayedEpisodesCount: episodes.length,
@@ -172,6 +173,7 @@ const cache = {
 const initialState = {
   currentEpisode: null,
   episodes: [],
+  isEpisodeListLoaded: false,
 
   displayedEpisodes: [],
   displayedEpisodesLength: 0,
@@ -217,6 +219,7 @@ const getters = {
   isEpisodeTime: state => state.isEpisodeTime,
 
   episodes: state => state.episodes,
+  isEpisodeListLoaded: state => state.isEpisodeListLoaded,
   episodeMap: state => cache.episodeMap,
   episodeRetakeStats: state => state.episodeRetakeStats,
   episodeStats: state => state.episodeStats,
@@ -259,10 +262,8 @@ const getters = {
 }
 
 const actions = {
-  setCurrentEpisode({ commit, rootGetters }, episodeId) {
+  setCurrentEpisode({ commit }, episodeId) {
     commit(SET_CURRENT_EPISODE, episodeId)
-    const productionId = rootGetters.currentProduction.id
-    commit(RESET_PRODUCTION_PATH, { productionId, episodeId })
   },
 
   setEpisodeListScrollPosition({ commit }, scrollPosition) {
@@ -374,13 +375,16 @@ const actions = {
     }
   },
 
-  loadEpisode({ commit, state }, episodeId) {
+  loadEpisode({ commit, state, rootGetters }, episodeId) {
     const episode = cache.episodeMap.get(episodeId)
     if (episode?.lock) return
 
     return shotsApi
       .getEpisode(episodeId)
       .then(episode => {
+        // The fetch may outlive a production switch: an episode of the
+        // production left behind would stay in the list of the new one.
+        if (episode.project_id !== rootGetters.currentProduction?.id) return
         if (cache.episodeMap.get(episode.id)) {
           commit(UPDATE_EPISODE, episode)
         } else {
@@ -390,14 +394,23 @@ const actions = {
       .catch(console.error)
   },
 
+  // Episodes of an arbitrary production, without touching the
+  // current-production episode state (used by cross-production pages).
+  loadProductionEpisodes(context, production) {
+    return shotsApi.getEpisodes(production)
+  },
+
   loadEpisodes({ commit, state, rootGetters }) {
     const currentProduction = rootGetters.currentProduction
-    const routeEpisodeId = rootGetters.route.params.episode_id
     const userFilters = rootGetters.userFilters
     return shotsApi.getEpisodes(currentProduction).then(episodes => {
       if (currentProduction?.id !== rootGetters.currentProduction?.id) {
         return episodes
       }
+      // Read the route once the response is in: the user may have changed
+      // episode during the fetch, and a snapshot taken at dispatch would
+      // silently move the store back to the episode left behind.
+      const routeEpisodeId = rootGetters.route.params.episode_id
       commit(LOAD_EPISODES_END, { episodes, routeEpisodeId, userFilters })
       return episodes
     })
@@ -570,10 +583,14 @@ const mutations = {
 
   [CLEAR_EPISODES](state) {
     state.episodes = []
+    state.isEpisodeListLoaded = false
     state.currentEpisode = null
     cache.episodes = []
     cache.result = []
     cache.episodeIndex = {}
+    // clear(), never a new Map(): the episodeMap getter has no reactive
+    // dependency, so Vuex memoizes the reference captured at its first read.
+    cache.episodeMap.clear()
   },
 
   [SET_CURRENT_EPISODE](state, episodeId) {
@@ -629,13 +646,11 @@ const mutations = {
         taskIds.push(task.id)
 
         const taskType = taskTypeMap.get(task.task_type_id)
-        if (!validationColumns[taskType.name]) {
+        if (taskType && !validationColumns[taskType.name]) {
           validationColumns[taskType.name] = taskType.id
         }
         if (task.assignees.length > 1) {
-          task.assignees = task.assignees.sort((a, b) => {
-            return personMap.get(a).name.localeCompare(personMap.get(b))
-          })
+          task.assignees = sortByPersonName(task.assignees, personMap)
         }
       })
       episode.tasks = taskIds
@@ -652,6 +667,13 @@ const mutations = {
     })
     episodes = sortByName(episodes)
 
+    // The topbar may list an episode added live during the fetch: keep it
+    // resolvable, or choosing it sets no current episode.
+    state.episodes.forEach(episode => {
+      if (!cache.episodeMap.has(episode.id)) {
+        cache.episodeMap.set(episode.id, episode)
+      }
+    })
     cache.episodes = episodes
     cache.result = episodes
     cache.episodeIndex = buildEpisodeIndex(episodes)
@@ -690,17 +712,26 @@ const mutations = {
   },
 
   [ADD_EPISODE](state, episode) {
-    state.episodes.push(episode)
-    const sortedEpisodes = sortByName(state.episodes)
+    // Each list copied from itself: after LOAD_EPISODES_END the lists are
+    // the same array, and pushing into each in place inserted the episode
+    // twice, while the Episodes page keeps its rows with tasks in
+    // cache.episodes only and must not get the plain list instead.
     cache.episodeMap.set(episode.id, episode)
-    state.episodes = sortedEpisodes
-    state.displayedEpisodes.push(episode)
-    state.displayedEpisodes = sortByName(state.displayedEpisodes)
-    cache.episodeIndex = buildEpisodeIndex(sortedEpisodes)
-    state.displayedEpisodesLength = sortedEpisodes.length
+    state.episodes = sortByName([...state.episodes, episode])
+    cache.episodes = sortByName([...cache.episodes, episode])
+    state.displayedEpisodes = sortByName([...state.displayedEpisodes, episode])
+    cache.episodeIndex = buildEpisodeIndex(cache.episodes)
+    state.displayedEpisodesLength = state.displayedEpisodes.length
   },
 
   [UPDATE_EPISODE](state, episode) {
+    // The map holds raw objects: assigned through it first, the lists showing
+    // the episode, the topbar selector among them, would see no change.
+    const lists = [state.episodes, state.displayedEpisodes]
+    lists.forEach(list => {
+      const listedEpisode = list.find(({ id }) => id === episode.id)
+      if (listedEpisode) Object.assign(listedEpisode, episode)
+    })
     Object.assign(cache.episodeMap.get(episode.id), episode)
     cache.episodeIndex = buildEpisodeIndex(state.episodes)
   },
@@ -708,12 +739,16 @@ const mutations = {
   [REMOVE_EPISODE](state, episodeToDelete) {
     cache.episodeMap.delete(episodeToDelete.id)
     cache.episodes = removeModelFromList(cache.episodes, episodeToDelete)
-    cache.result = removeModelFromList(cache.episodes, episodeToDelete)
+    // From the search result, not from the list it was just removed from:
+    // recomputing it from cache.episodes would widen it to every episode.
+    cache.result = removeModelFromList(cache.result, episodeToDelete)
     cache.episodeIndex = buildEpisodeIndex(cache.episodes)
+    state.episodes = removeModelFromList(state.episodes, episodeToDelete)
     state.displayedEpisodes = removeModelFromList(
       state.displayedEpisodes,
       episodeToDelete
     )
+    helpers.setListStats(state, state.displayedEpisodes)
   },
 
   [SET_EPISODE_SEARCH](state, payload) {
@@ -735,14 +770,26 @@ const mutations = {
 
     state.episodeSelectionGrid = buildSelectionGrid()
 
-    cache.episodes = state.displayedEpisodes
-    cache.episodes.push(episode)
-    cache.episodes = sortByName(cache.episodes)
-    state.episodes = cache.episodes
-    state.displayedEpisodes = cache.episodes
+    // zou emits episode:new before this response lands, so the socket
+    // handler may already have inserted the episode through ADD_EPISODE:
+    // merge into that copy instead of appending a second one.
+    const knownEpisode = cache.episodeMap.get(episode.id)
+    if (knownEpisode) {
+      Object.assign(knownEpisode, episode)
+    } else {
+      // Each list copied from itself, like ADD_EPISODE: the displayed list is
+      // a search result, and taking it for the whole dataset dropped every
+      // episode the search filtered out, the topbar selector included.
+      cache.episodeMap.set(episode.id, episode)
+      state.episodes = sortByName([...state.episodes, episode])
+      cache.episodes = sortByName([...cache.episodes, episode])
+      state.displayedEpisodes = sortByName([
+        ...state.displayedEpisodes,
+        episode
+      ])
+    }
 
-    helpers.setListStats(state, cache.episodes)
-    cache.episodeMap.set(episode.id, episode)
+    helpers.setListStats(state, state.displayedEpisodes)
     state.episodeFilledColumns = getFilledColumns(state.displayedEpisodes)
     cache.episodeIndex = buildEpisodeIndex(cache.episodes)
   },
@@ -790,8 +837,23 @@ const mutations = {
   },
 
   [LOAD_EPISODES_END](state, { episodes, routeEpisodeId }) {
-    if (state.episodes.length > 0) return
+    // The topbar refetches the list of a small production on every episode
+    // change: a second response must not rebuild a list already loaded. An
+    // empty list is rebuilt so the route episode is resolved again.
+    if (state.isEpisodeListLoaded && state.episodes.length > 0) return
     if (!episodes) episodes = []
+    // An episode:new received while the list was in flight filled the list
+    // first, and the response may not hold that episode yet.
+    const responseIds = new Set(episodes.map(({ id }) => id))
+    const liveEpisodes = state.episodes.filter(({ id }) => !responseIds.has(id))
+    episodes = episodes.concat(liveEpisodes)
+    // The Episodes page may have loaded them with their tasks first: keep
+    // those rows, refreshed, rather than plain ones without task columns.
+    episodes = episodes.map(episode => {
+      const loaded = cache.episodeMap.get(episode.id)
+      return loaded?.validations ? Object.assign(loaded, episode) : episode
+    })
+    state.isEpisodeListLoaded = true
     cache.episodeMap.clear()
     episodes.forEach(episode => {
       if (!EPISODE_STATUS.includes(episode.status)) {
@@ -875,6 +937,9 @@ const mutations = {
             taskTypeMap,
             taskStatusMap
           )
+          // An episode added live has no task columns yet.
+          if (!episode.validations) episode.validations = new Map()
+          if (!episode.tasks) episode.tasks = []
           episode.validations.set(task.task_type_id, task.id)
           const displayedEpisode = state.displayedEpisodes.find(
             e => e.id === episode.id
@@ -935,6 +1000,7 @@ const mutations = {
         state.episodeFilledColumns[task.task_type_id] = true
       }
       // Push task and readds the whole map to activate the realtime display.
+      if (!episode.tasks) episode.tasks = []
       episode.tasks.push(task.id)
       if (!episode.validations) episode.validations = new Map()
       episode.validations.set(task.task_type_id, task.id)
@@ -961,13 +1027,15 @@ const mutations = {
     }
   },
 
-  [SET_PREVIEW](state, { entityId, taskId, previewId, taskMap }) {
-    const episodes = state.displayedEpisodes.find(s => s.id === entityId)
-    if (episodes) {
-      episodes.preview_file_id = previewId
-      episodes.tasks.forEach(taskId => {
+  [SET_PREVIEW](state, { entityId, previewId, taskMap }) {
+    const episode = state.displayedEpisodes.find(e => e.id === entityId)
+    if (episode) {
+      episode.preview_file_id = previewId
+      // loadEpisodes fills displayedEpisodes without tasks, unlike
+      // loadEpisodesWithTasks.
+      episode.tasks?.forEach(taskId => {
         const task = taskMap.get(taskId)
-        if (task) task.entity.preview_file_id = previewId
+        if (task?.entity) task.entity.preview_file_id = previewId
       })
     }
   },

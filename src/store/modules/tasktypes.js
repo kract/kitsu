@@ -4,7 +4,6 @@ import { sortTaskTypes } from '@/lib/sorting'
 
 import {
   LOAD_TASK_TYPES_START,
-  LOAD_TASK_TYPES_ERROR,
   LOAD_TASK_TYPES_END,
   EDIT_TASK_TYPE_START,
   EDIT_TASK_TYPE_ERROR,
@@ -15,6 +14,8 @@ import {
   RESET_ALL
 } from '@/store/mutation-types'
 
+// Never reassign this map: the getter exposing it has no reactive dependency,
+// so consumers keep forever the object they read first. Always mutate in place.
 const cache = {
   taskTypeMap: new Map()
 }
@@ -116,6 +117,18 @@ const getters = {
     }
 }
 
+// Entity lists are cached per production and per episode: a map warm with the
+// episode the user came from holds nothing the page can display, so its size
+// alone cannot say whether a load is needed.
+const isScopeLoaded = (rootGetters, loadingKey) => {
+  const production = rootGetters.currentProduction
+  if (!production) return false
+  const scope = rootGetters.isTVShow
+    ? (rootGetters.currentEpisode?.id ?? '')
+    : ''
+  return loadingKey === `${production.id}/${scope}`
+}
+
 const actions = {
   uploadTaskTypeEstimations({ commit, state, rootGetters }, formData) {
     return taskTypesApi.postTaskTypeEstimations(
@@ -183,9 +196,9 @@ const actions = {
     return taskTypesApi.reorderTaskTypes(taskTypeIds)
   },
 
-  deleteTaskType({ commit, state }, taskType) {
+  deleteTaskType({ commit, state }, { taskType, force = false }) {
     commit(DELETE_TASK_TYPE_START)
-    return taskTypesApi.deleteTaskType(taskType).then(() => {
+    return taskTypesApi.deleteTaskType(taskType, force).then(() => {
       commit(DELETE_TASK_TYPE_END, taskType)
       Promise.resolve(taskType)
     })
@@ -194,7 +207,11 @@ const actions = {
   initTaskType({ commit, dispatch, state, rootState, rootGetters }, force) {
     return new Promise((resolve, reject) => {
       if (rootGetters.currentTaskType.for_entity === 'Shot') {
-        if (rootGetters.shotMap.size < 2 || force) {
+        if (
+          rootGetters.shotMap.size < 2 ||
+          force ||
+          !isScopeLoaded(rootGetters, rootGetters.shotsLoadingKey)
+        ) {
           if (rootGetters.episodes.length === 0 && rootGetters.isTVShow) {
             return dispatch('loadEpisodes')
               .then(() => dispatch('loadShots'))
@@ -207,7 +224,11 @@ const actions = {
           resolve()
         }
       } else if (rootGetters.currentTaskType.for_entity === 'Asset') {
-        if (rootGetters.assetMap.size < 2 || force) {
+        if (
+          rootGetters.assetMap.size < 2 ||
+          force ||
+          !isScopeLoaded(rootGetters, rootGetters.assetsLoadingKey)
+        ) {
           if (rootGetters.episodes.length === 0 && rootGetters.isTVShow) {
             return dispatch('loadEpisodes')
               .then(() => dispatch('loadAssets'))
@@ -220,7 +241,11 @@ const actions = {
           resolve()
         }
       } else if (rootGetters.currentTaskType.for_entity === 'Edit') {
-        if (rootGetters.editMap.size < 2 || force) {
+        if (
+          rootGetters.editMap.size < 2 ||
+          force ||
+          !isScopeLoaded(rootGetters, rootGetters.editsLoadingKey)
+        ) {
           return dispatch('loadEdits').then(resolve).catch(reject)
         } else {
           resolve()
@@ -232,7 +257,11 @@ const actions = {
           resolve()
         }
       } else if (rootGetters.currentTaskType.for_entity === 'Sequence') {
-        if (rootGetters.sequenceMap.size < 2 || force) {
+        if (
+          rootGetters.sequenceMap.size < 2 ||
+          force ||
+          !isScopeLoaded(rootGetters, rootGetters.sequencesLoadingKey)
+        ) {
           return dispatch('loadSequencesWithTasks').then(resolve).catch(reject)
         } else {
           resolve()
@@ -245,18 +274,12 @@ const actions = {
 const mutations = {
   [LOAD_TASK_TYPES_START](state) {},
 
-  [LOAD_TASK_TYPES_ERROR](state) {
-    state.taskTypes = []
-    cache.taskTypeMap = new Map()
-  },
-
   [LOAD_TASK_TYPES_END](state, taskTypes) {
     state.taskTypes = sortTaskTypes(taskTypes)
-    const map = new Map()
+    cache.taskTypeMap.clear()
     taskTypes.forEach(taskType => {
-      map.set(taskType.id, taskType)
+      cache.taskTypeMap.set(taskType.id, taskType)
     })
-    cache.taskTypeMap = map
   },
 
   [EDIT_TASK_TYPE_START](state, data) {},

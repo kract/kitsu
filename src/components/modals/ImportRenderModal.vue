@@ -7,53 +7,20 @@
     <p>
       {{ $t('main.csv.preview_required') }}
     </p>
-    <div class="description">
+    <div class="preview-info">
       <div v-if="!disableUpdate">
-        <h2 class="legend-title">
-          {{ $t('main.csv.options.title') }}
-        </h2>
+        <span class="group-label">{{ $t('main.csv.options.title') }}</span>
         <checkbox
           :toggle="true"
           :label="$t('main.csv.options.update')"
           v-model="updateData"
         />
       </div>
-      <h3 class="legend-title">
-        {{ $t('main.csv.legend') }}
-      </h3>
-      <div class="flexrow legends">
-        <ul class="legend flexrow-item">
-          <li class="legend-definition">
-            <span class="legend-term"></span>
-            {{ $t('main.csv.legend_ok') }}
-          </li>
-          <li class="legend-definition">
-            <span class="legend-term ignored"></span>
-            {{ $t('main.csv.legend_ignored') }}
-          </li>
-          <li class="legend-definition">
-            <span class="legend-term missing"></span>
-            {{ $t('main.csv.legend_missing') }}
-          </li>
-          <li class="legend-definition">
-            <span class="legend-term missing-optional"></span>
-            {{ $t('main.csv.legend_missing_optional') }}
-          </li>
-        </ul>
-        <ul class="legend flexrow-item">
-          <li class="legend-definition">
-            <span class="legend-term"></span>
-            {{ $t('main.csv.legend_line_ok') }}
-          </li>
-          <li class="legend-definition">
-            <span class="legend-term disabled"></span>
-            {{ $t('main.csv.legend_disabled') }}
-          </li>
-          <li v-if="!disableUpdate" class="legend-definition">
-            <span class="legend-term overwrite"></span>
-            {{ $t('main.csv.legend_overwrite') }}
-          </li>
-        </ul>
+      <div class="legend-items">
+        <span class="legend-item" :key="item.label" v-for="item in legendItems">
+          <span class="legend-term" :class="item.state"></span>
+          {{ item.label }}
+        </span>
       </div>
     </div>
 
@@ -109,6 +76,7 @@
         <tbody>
           <tr
             :class="{
+              'error-row': index + 2 === errorLine,
               overwrite: updateData && existingData(index),
               disabled: !updateData && existingData(index)
             }"
@@ -133,15 +101,40 @@
 
     <div class="new-entities" v-if="updateData && newEntityNames.length > 0">
       <p class="new-entities-text">
-        {{ $t('main.csv.new_entities_to_create', newEntityNames.length) }}
+        {{
+          $t('main.csv.new_entities_to_create', {
+            count: newEntityNames.length
+          })
+        }}
       </p>
       <p class="new-entities-names">
         {{ newEntityNames.join(', ') }}
       </p>
       <checkbox
-        :label="$t('main.csv.new_entities_confirmation', newEntityNames.length)"
+        :label="
+          $t('main.csv.new_entities_confirmation', {
+            count: newEntityNames.length
+          })
+        "
         v-model="newEntitiesConfirmed"
       />
+    </div>
+
+    <div class="import-error" v-if="isError">
+      <p class="import-error-title">{{ $t('main.csv.error_upload') }}</p>
+      <p v-if="serverError">
+        <span class="line-badge" v-if="serverError.line_number">
+          {{ $t('main.csv.error_line', { line: serverError.line_number }) }}
+        </span>
+        {{ serverError.message }}
+      </p>
+      <p class="imported-rows" v-if="serverError?.imported_rows > 0">
+        {{
+          $t('main.csv.error_imported_rows', {
+            count: serverError.imported_rows
+          })
+        }}
+      </p>
     </div>
 
     <div class="render-footer">
@@ -150,10 +143,8 @@
         @click="$emit('reupload')"
       />
       <modal-footer
-        :error-text="errorText"
         :is-loading="isLoading"
         :is-disabled="isConfirmDisabled"
-        :is-error="isError"
         @confirm="$emit('confirm', parsedCsv, updateData)"
         @cancel="$emit('cancel')"
       />
@@ -206,6 +197,9 @@ const shotMetadataDescriptors = computed(
 const editMetadataDescriptors = computed(
   () => store.getters.editMetadataDescriptors
 )
+const taskMetadataDescriptors = computed(
+  () => store.getters.taskMetadataDescriptors
+)
 
 const columnsRequired = computed(() => {
   if (props.parsedCsv.length === 0) return []
@@ -225,6 +219,13 @@ const columnsOptional = computed(() => {
 
 const metadataDescriptors = computed(() => {
   const path = route.path
+  // The task type route also contains the entity type segment
+  // (/productions/:id/:type/task-types/:id), so check task-types first.
+  if (path.indexOf('task-types') > 0) {
+    return taskMetadataDescriptors.value.filter(
+      descriptor => descriptor.task_type_id === route.params.task_type_id
+    )
+  }
   if (path.indexOf('assets') > 0) return assetMetadataDescriptors.value
   if (path.indexOf('shots') > 0) return shotMetadataDescriptors.value
   if (path.indexOf('edits') > 0) return editMetadataDescriptors.value
@@ -247,6 +248,21 @@ const columnOptions = computed(() => {
     options.push({ label: item, value: item })
   })
   return options
+})
+
+const legendItems = computed(() => {
+  const items = [
+    { state: '', label: t('main.csv.legend_ok') },
+    { state: 'ignored', label: t('main.csv.legend_ignored') },
+    { state: 'missing', label: t('main.csv.legend_missing') },
+    { state: 'missing-optional', label: t('main.csv.legend_missing_optional') },
+    { state: '', label: t('main.csv.legend_line_ok') },
+    { state: 'disabled', label: t('main.csv.legend_disabled') }
+  ]
+  if (!props.disableUpdate) {
+    items.push({ state: 'overwrite', label: t('main.csv.legend_overwrite') })
+  }
+  return items
 })
 
 // columnSelect intentionally returns parsedCsv[0] directly so that
@@ -274,14 +290,13 @@ const isConfirmDisabled = computed(
     !newEntitiesConfirmed.value
 )
 
-const errorText = computed(() => {
-  let text = t('main.csv.error_upload')
-  if (props.importError?.status === 400) {
-    const res = props.importError.response
-    text += ` (line: ${res.body.line_number}) ${res.body.message}`
-  }
-  return text
-})
+const serverError = computed(() =>
+  props.importError?.status === 400
+    ? (props.importError.response?.body ?? null)
+    : null
+)
+
+const errorLine = computed(() => serverError.value?.line_number ?? null)
 
 const stateColumn = data =>
   columnsAllowed.value.includes(data) ? undefined : 'ignored'
@@ -314,92 +329,98 @@ watch(
 </script>
 
 <style lang="scss" scoped>
-.dark {
-  .render-container {
-    .render {
-      th,
-      td {
-        border: 1px solid $dark-grey-lightest;
-        color: $white;
-      }
-      tr:not(.render-headers):hover {
-        background-color: $dark-grey-lightmore;
-      }
-    }
-  }
-  .render-select {
-    border-color: $dark-grey-lightest;
-  }
-  .legend-term {
-    border: 1px solid $dark-grey-lightest;
-  }
-  .ignored {
-    background-color: $dark-grey;
-  }
-  .disabled {
-    background: repeating-linear-gradient(
-      -45deg,
-      rgba($dark-grey, 0.6),
-      rgba($dark-grey, 0.6) 2px,
-      transparent 2px,
-      transparent 10px
-    );
-  }
-}
-.modal-content {
-  margin: 6rem auto 1.4rem;
+:deep(.modal-content) {
   max-width: calc(100vw - 4rem);
-  max-height: calc(100% - 6rem);
+  min-width: min(800px, calc(100vw - 4rem));
   width: auto;
 }
-.modal-content .box p.text {
-  margin-bottom: 1em;
+
+:deep(.modal-content .box h2.title) {
+  margin-bottom: 0.5em;
 }
-.error {
-  margin-top: 1em;
+
+.preview-info {
+  background: $white-grey-light;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  margin: 1.2em 0;
+  padding: 0.9em 1.4em;
 }
-.description {
-  margin-bottom: 1em;
-  margin-top: 2em;
-  .flex-item {
-    flex: 1 1 50%;
-  }
+
+.group-label {
+  color: var(--text-alt);
+  display: block;
+  font-size: 0.9em;
+  margin-bottom: 0.5em;
 }
+
+.legend-items {
+  column-gap: 1.5em;
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 0.5em;
+}
+
+.legend-item {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  font-size: 0.9em;
+  gap: 0.5em;
+}
+
+.legend-term {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: inline-block;
+  flex-shrink: 0;
+  height: 1.2em;
+  width: 1.2em;
+}
+
 .render-container {
-  max-height: 300px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-height: 50vh;
   overflow: auto;
-  .render-headers {
-    .field {
-      margin: 0;
-    }
+
+  .render-headers .field {
+    margin: 0;
   }
+
   .render {
     width: 100%;
-    border: 1px solid $light-grey-light;
+
     th,
     td {
-      color: $dark-grey;
-      border: 1px solid $light-grey-light;
+      border: 1px solid var(--border);
+      color: var(--text);
       padding: 0.75rem;
     }
+
     tr:hover {
       background: none;
     }
+
     tr:not(.render-headers):hover {
-      background-color: $white-grey-light;
+      background-color: var(--background-hover);
     }
   }
 }
 
 .render-select {
+  border-bottom: 1px solid var(--border);
   margin-bottom: 0.75rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid $light-grey-light;
 }
 
 .new-entities {
   border: 1px solid $orange-carrot;
-  border-radius: 4px;
+  border-radius: 10px;
   margin-top: 1em;
   padding: 1em;
 
@@ -417,51 +438,50 @@ watch(
   }
 }
 
+.import-error {
+  background: rgba($red, 0.08);
+  border: 1px solid $red;
+  border-radius: 10px;
+  color: var(--text);
+  margin-top: 1em;
+  padding: 1em;
+
+  .import-error-title {
+    font-weight: bold;
+    margin-bottom: 0.5em;
+  }
+
+  .imported-rows {
+    color: var(--text-alt);
+    font-size: 0.9em;
+    margin-top: 0.5em;
+  }
+}
+
+.line-badge {
+  background: $red;
+  border-radius: 4px;
+  color: white;
+  font-size: 0.85em;
+  font-weight: 600;
+  margin-right: 0.5em;
+  padding: 0.1em 0.5em;
+}
+
+.error-row td {
+  background-color: rgba($red, 0.15);
+}
+
 .render-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 2rem;
-}
+  margin-top: 1rem;
 
-.modal-content .box h2.title {
-  margin-bottom: 0;
-}
-
-.legend-title {
-  color: var(--text);
-  font-size: 1em;
-  font-weight: bold;
-  margin-bottom: 1.5em;
-  margin-top: 0;
-  text-transform: uppercase;
-}
-
-.legends {
-  align-items: flex-start;
-}
-
-.legend {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.legend-term {
-  display: inline-block;
-  margin-right: 0.5rem;
-  width: 1.5rem;
-  height: 1.5rem;
-  border: 1px solid $light-grey-light;
-}
-.legend-definition {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  margin: 0 1rem 0.5rem 0;
+  // The row provides the spacing, neutralize ModalFooter's own top margin
+  .modal-footer {
+    margin-top: 0;
+  }
 }
 
 .ignored {
@@ -476,18 +496,10 @@ watch(
   background-color: rgba($red, 0.2);
 }
 
-.optional-header,
-.required-header {
-  vertical-align: bottom;
-}
-
-col.missing-optional,
-col.missing {
+th.optional-header,
+th.required-header {
   min-width: 150px;
-
-  th {
-    vertical-align: bottom;
-  }
+  vertical-align: bottom;
 }
 
 .disabled {
@@ -500,11 +512,32 @@ col.missing {
     transparent 10px
   );
 }
+
 .overwrite {
   background-color: rgba($blue, 0.2);
 
   &:hover td {
     background-color: rgba($blue, 0.3);
+  }
+}
+
+.dark {
+  .preview-info {
+    background: var(--background-alt);
+  }
+
+  .ignored {
+    background-color: $dark-grey;
+  }
+
+  .disabled {
+    background: repeating-linear-gradient(
+      -45deg,
+      rgba($dark-grey, 0.6),
+      rgba($dark-grey, 0.6) 2px,
+      transparent 2px,
+      transparent 10px
+    );
   }
 }
 </style>

@@ -26,9 +26,12 @@ const getters = {
 }
 
 const actions = {
-  async loadScheduleItems({ commit }, production) {
+  async loadScheduleItems({ commit, rootGetters }, production) {
     const scheduleItems = await scheduleApi.getScheduleItems(production)
-    commit(SET_CURRENT_SCHEDULE_ITEMS, scheduleItems)
+    // A production switched during the fetch owns the schedule now.
+    if (production.id === rootGetters.currentProduction?.id) {
+      commit(SET_CURRENT_SCHEDULE_ITEMS, scheduleItems)
+    }
     return scheduleItems
   },
 
@@ -37,16 +40,24 @@ const actions = {
     commit(SET_CURRENT_SCHEDULE_ITEMS, scheduleItems)
   },
 
-  loadAssetTypeScheduleItems({}, { production, taskType }) {
-    return scheduleApi.getAssetTypeScheduleItems(production, taskType)
+  loadAssetTypeScheduleItems({}, { production, taskType, episodeId = null }) {
+    return scheduleApi.getAssetTypeScheduleItems(
+      production,
+      taskType,
+      episodeId
+    )
   },
 
-  loadSequenceScheduleItems({}, { production, taskType }) {
-    return scheduleApi.getSequenceScheduleItems(production, taskType)
+  loadSequenceScheduleItems({}, { production, taskType, episodeId = null }) {
+    return scheduleApi.getSequenceScheduleItems(production, taskType, episodeId)
   },
 
-  loadEpisodeScheduleItems({}, { production, taskType }) {
-    return scheduleApi.getEpisodeScheduleItems(production, taskType)
+  loadEditScheduleItems({}, { production, taskType, episodeId = null }) {
+    return scheduleApi.getEditScheduleItems(production, taskType, episodeId)
+  },
+
+  loadEpisodeScheduleItems({}, { production, taskType, episodeId = null }) {
+    return scheduleApi.getEpisodeScheduleItems(production, taskType, episodeId)
   },
 
   createScheduleItem({ commit, state }, scheduleItem) {
@@ -129,11 +140,13 @@ const actions = {
     })
   },
 
-  async loadScheduleVersions({ commit }, production) {
+  async loadScheduleVersions({ commit, rootGetters }, production) {
     const scheduleVersions = production
       ? await scheduleApi.getScheduleVersions(production)
       : []
-    commit(SET_SCHEDULE_VERSIONS, scheduleVersions)
+    if (!production || production.id === rootGetters.currentProduction?.id) {
+      commit(SET_SCHEDULE_VERSIONS, scheduleVersions)
+    }
     return scheduleVersions
   },
 

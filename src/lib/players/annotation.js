@@ -31,7 +31,11 @@ import { roundToFrame } from '@/lib/video'
 
 import { normalizeSerializedType, normalizeType } from './annotationTypes'
 import { Arrow, registerArrowFabricShape } from './arrowshape'
-import { installEraserObjectSupport, reviveObjectEraser } from './eraserbrush'
+import {
+  installEraserObjectSupport,
+  reviveObjectEraser,
+  serializeEraserMask
+} from './eraserbrush'
 
 // Register Arrow in classRegistry (the deserialiser branches on `obj.type === 'arrow'`).
 registerArrowFabricShape()
@@ -142,6 +146,18 @@ export const SHAPE_WIDTHS = {
   tiny: 1
 }
 
+// Font sizes in canvas units, keyed like the pencil widths so the text tool
+// reuses the pencil picker. `medium` keeps the historical 12px default.
+export const TEXT_SIZES = {
+  huge: 24,
+  big: 17,
+  medium: 12,
+  small: 9,
+  tiny: 6
+}
+
+export const DEFAULT_TEXT_SIZE = 'medium'
+
 /* -------------------------------------------------------------------------
  * Object helpers
  * -----------------------------------------------------------------------*/
@@ -160,13 +176,14 @@ export const addSerialization = object => {
     result.scale = this.scale
     result.createdBy = this.createdBy
     result.createdAt = this.createdAt
-    // Persist the eraser mask centrally: PSStroke's custom toObject() goes
-    // through the psbrush callSuper shim and doesn't reliably reach the patched
-    // fabric.Object.prototype.toObject, so relying on that alone loses the mask
-    // for freehand strokes. The mask is in the object's LOCAL coordinates;
-    // normalizeSerializedAnnotation only rescales left/top/scale, never eraser.
+    // Persist the eraser mask centrally: addSerialization is applied to plain
+    // objects too, whose toJSON() never reaches the patched
+    // fabric.Object.prototype.toObject, so the mask would be dropped (or a
+    // stale one kept) without this. The mask is in the object's LOCAL
+    // coordinates; normalizeSerializedAnnotation only rescales left/top/scale,
+    // never eraser.
     if (this.eraser && !this.eraser.excludeFromExport) {
-      result.eraser = this.eraser.toObject()
+      result.eraser = serializeEraserMask(this.eraser)
     } else {
       delete result.eraser
     }
@@ -177,6 +194,35 @@ export const addSerialization = object => {
     return normalizeSerializedAnnotation(this, result)
   }
   return object
+}
+
+// fabric's toObject() does not emit the interaction flags, so a clone comes
+// back with the class defaults (selectable and evented both true) whatever the
+// source allowed. The artist read-only contract lives on those flags.
+const INTERACTION_KEYS = ['selectable', 'evented', 'editable']
+
+/**
+ * Clones a fabric annotation object, eraser mask included.
+ *
+ * fabric's clone() is toObject() + fromObject(), and the fromObject overrides
+ * that bypass fabric's generic revival (psbrush's PSStroke, our Arrow) hand
+ * back the mask as a plain object, or drop it. Rebuild a real Eraser from the
+ * source so the copy renders its holes and round-trips like any other object.
+ *
+ * The interaction flags are carried over too: a copy must never be more
+ * permissive than the object it was copied from.
+ */
+export const cloneAnnotationObject = async source => {
+  const clone = await source.clone()
+  if (source.eraser) {
+    await reviveObjectEraser(clone, {
+      eraser: serializeEraserMask(source.eraser)
+    })
+  }
+  INTERACTION_KEYS.forEach(key => {
+    if (source[key] !== undefined) clone.set(key, source[key])
+  })
+  return clone
 }
 
 /**

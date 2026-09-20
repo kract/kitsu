@@ -4,29 +4,15 @@
  */
 import { mapGetters } from 'vuex'
 
-// Descriptor choices are static per descriptor — no need to reparse them
-// for every row. Cache keyed by descriptor.id, cleared when it grows too large.
-const _checklistValuesCache = new Map()
+import {
+  getDescriptorChecklistValues,
+  getDescriptorChoicesOptions,
+  getMetadataChecklistValues,
+  getMetadataEventValue,
+  getMetadataFieldValue
+} from '@/composables/descriptors'
 
-export const getDescriptorChecklistValues = descriptor => {
-  const cached = _checklistValuesCache.get(descriptor.id)
-  if (cached) return cached
-  const values = descriptor.choices.reduce((result, choice) => {
-    if (choice && typeof choice === 'string' && choice.startsWith('[x] ')) {
-      result.push({ text: choice.slice(4), checked: true })
-    } else if (
-      choice &&
-      typeof choice === 'string' &&
-      choice.startsWith('[ ] ')
-    ) {
-      result.push({ text: choice.slice(4), checked: false })
-    }
-    return result
-  }, [])
-  const result = values.length === descriptor.choices.length ? values : []
-  _checklistValuesCache.set(descriptor.id, result)
-  return result
-}
+export { getDescriptorChecklistValues }
 
 export const descriptorMixin = {
   emits: [
@@ -74,20 +60,8 @@ export const descriptorMixin = {
     },
 
     onMetadataFieldChanged(entry, descriptor, event) {
-      let value
-      if (typeof event === 'string') {
-        value = event
-      } else if (!event.target.validity.valid) {
-        return
-      } else if (descriptor.data_type === 'boolean') {
-        value = event.target.checked ? 'true' : 'false'
-      } else if (descriptor.data_type === 'number') {
-        value = !isNaN(event.target.valueAsNumber)
-          ? event.target.valueAsNumber
-          : null
-      } else {
-        value = event.target.value
-      }
+      const value = getMetadataEventValue(descriptor, entry, event)
+      if (value === undefined) return
 
       if (this.selectedShots.has(entry.id)) {
         // if the line is selected, also modify the cells of the other selected
@@ -153,54 +127,20 @@ export const descriptorMixin = {
       this.showHeaderMenuAt(
         'headerMetadataMenu',
         event,
-        event => event.srcElement.parentNode.parentNode,
-        { left: -3, top: 11 }
+        event => event.target.closest('th'),
+        { left: -3, top: 4 },
+        this.lastMetadataHeaderMenuDisplayed === columnId
       )
       this.lastMetadataHeaderMenuDisplayed = columnId
     },
 
-    getDescriptorChoicesOptions(descriptor, emptyChoice = true) {
-      const values = descriptor.choices.map(c => ({ label: c, value: c }))
-      if (emptyChoice) {
-        values.unshift({ label: '', value: '' })
-      }
-      return values
-    },
+    getDescriptorChoicesOptions,
 
-    getMetadataFieldValue(descriptor, entity) {
-      if (
-        entity.data &&
-        descriptor.field_name in entity.data &&
-        entity.data[descriptor.field_name] != null
-      ) {
-        return entity.data[descriptor.field_name]
-      } else if (
-        entity.entity_data &&
-        descriptor.field_name in entity.entity_data &&
-        entity.entity_data[descriptor.field_name] != null
-      ) {
-        return entity.entity_data[descriptor.field_name]
-      } else {
-        return ''
-      }
-    },
+    getMetadataFieldValue,
 
     getDescriptorChecklistValues,
 
-    getMetadataChecklistValues(descriptor, entity) {
-      let values
-      try {
-        values = JSON.parse(this.getMetadataFieldValue(descriptor, entity))
-      } catch {
-        values = {}
-      }
-      this.getDescriptorChecklistValues(descriptor).forEach(function (option) {
-        if (!(option.text in values)) {
-          values[option.text] = option.checked
-        }
-      })
-      return values
-    },
+    getMetadataChecklistValues,
 
     isSupervisorInDepartments(departments = []) {
       if (!Array.isArray(departments)) {

@@ -18,10 +18,13 @@ import { markRaw, ref, watch } from 'vue'
 
 import { useDrawingTools } from '@/composables/players/drawingTools'
 import {
+  DEFAULT_TEXT_SIZE,
   SHAPE_WIDTHS,
+  TEXT_SIZES,
   addSerialization,
   attachShapeDrawing,
   buildReadOnlyShape,
+  cloneAnnotationObject,
   deserializePSStroke,
   getAnnotationContainMapping
 } from '@/lib/players/annotation'
@@ -32,6 +35,7 @@ import {
   reviveObjectEraser
 } from '@/lib/players/eraserbrush'
 import clipboard from '@/lib/clipboard'
+import func from '@/lib/func'
 import { formatFullDate } from '@/lib/time'
 import localPreferences from '@/lib/preferences'
 
@@ -154,6 +158,7 @@ export const useAnnotation = ({
   const pencilColor = ref('#ff3860')
   const pencilWidth = ref('big')
   const textColor = ref('#ff3860')
+  const textSize = ref(DEFAULT_TEXT_SIZE)
   const isShapeMode = ref(false)
   const currentShape = ref('rectangle')
   const mouseIsDrawing = ref(false)
@@ -200,6 +205,12 @@ export const useAnnotation = ({
     return fabricCanvas.value.getObjects().find(obj => obj.id === objectId)
   }
 
+  // Canvas box a history entry's object had its coordinates projected onto.
+  const getCanvasProjection = () => ({
+    width: fabricCanvas.value?.width,
+    height: fabricCanvas.value?.height
+  })
+
   const setObjectData = object => {
     // canvasWidth / canvasHeight are the dimensions the object's left /
     // top were authored against — never refresh them, or a later save
@@ -226,17 +237,31 @@ export const useAnnotation = ({
     return object
   }
 
+  // add() fires object:added whose handler stacks the action already;
+  // drop that entry (and only that one — the laser branch stacks
+  // nothing) so addObject's explicit push stays the single one.
+  const popOwnAddEntry = obj => {
+    const top = doneActionStack[doneActionStack.length - 1]
+    if (top?.type === 'add' && top.obj === obj) doneActionStack.pop()
+  }
+
   const addObject = (activeObject, persist = true) => {
     if (activeObject._objects) {
       activeObject._objects.forEach(obj => {
         fabricCanvas.value.add(obj)
-        doneActionStack.pop()
+        popOwnAddEntry(obj)
       })
     } else {
       fabricCanvas.value.add(activeObject)
+      popOwnAddEntry(activeObject)
     }
     if (persist) {
-      doneActionStack.push({ type: 'add', obj: activeObject })
+      doneActionStack.push({
+        type: 'add',
+        obj: activeObject,
+        time: getCurrentTime(),
+        projection: getCanvasProjection()
+      })
       saveAnnotationsCb()
     }
   }
@@ -248,7 +273,7 @@ export const useAnnotation = ({
     const posX = getClientX(event) - offsetCanvas.x
     const posY = getClientY(event) - offsetCanvas.y
     const baseHeight = 320
-    let fontSize = 12
+    let fontSize = TEXT_SIZES[textSize.value] || TEXT_SIZES[DEFAULT_TEXT_SIZE]
     if (fabricCanvas.value.getHeight() > baseHeight) {
       fontSize = fontSize * (fabricCanvas.value.getHeight() / baseHeight)
     }
@@ -300,7 +325,11 @@ export const useAnnotation = ({
   }
 
   const deleteObject = activeObject => {
-    if (activeObject && activeObject._objects) {
+    // Delete pressed with nothing selected: bail out before the trailing
+    // save, which re-serialized the canvas, created a phantom empty
+    // annotation entry and sent an empty batch to the server.
+    if (!activeObject) return
+    if (activeObject._objects) {
       // ActiveSelection children carry coords relative to the
       // selection's center. discardActiveObject() restores them to
       // absolute first so undo can re-inject them at the right place,
@@ -311,13 +340,24 @@ export const useAnnotation = ({
       children.forEach(obj => {
         fabricCanvas.value.remove(obj)
         addToDeletions(obj)
-        doneActionStack.push({ type: 'remove', obj })
+        doneActionStack.push({
+          type: 'remove',
+          obj,
+          time: getCurrentTime(),
+          projection: getCanvasProjection()
+        })
       })
-    } else if (activeObject) {
+    } else {
       fabricCanvas.value.remove(activeObject)
       addToDeletions(activeObject)
-      doneActionStack.push({ type: 'remove', obj: activeObject })
+      doneActionStack.push({
+        type: 'remove',
+        obj: activeObject,
+        time: getCurrentTime(),
+        projection: getCanvasProjection()
+      })
     }
+    clearUndoneOnUserAction()
     saveAnnotationsCb()
   }
 
@@ -448,6 +488,60 @@ export const useAnnotation = ({
 
   // Annotations
 
+  // Serialize a selection child with its ABSOLUTE transform: serialize()
+  // reads the group-relative state, and the previous manual compensations
+  // wrote live-canvas pixels over the normalized result (wrong reference
+  // frame whenever the canvas differs from the authored size) while
+  // ignoring the group's scale and rotation entirely.
+  const GROUP_TRANSFORM_KEYS = [
+    'left',
+    'top',
+    'angle',
+    'scaleX',
+    'scaleY',
+    'skewX',
+    'skewY',
+    'flipX',
+    'flipY'
+  ]
+
+  const serializeAbsolute = obj => {
+    const group = obj.group
+    if (!group) return obj.serialize()
+    const saved = {}
+    GROUP_TRANSFORM_KEYS.forEach(key => {
+      saved[key] = obj[key]
+    })
+    const matrix = obj.calcTransformMatrix()
+    obj.group = undefined
+    util.applyTransformToObject(obj, matrix)
+    const result = obj.serialize()
+    obj.group = group
+    obj.set(saved)
+    obj.setCoords()
+    return result
+  }
+
+  // A single unserializable object must not cost the whole frame its save:
+  // these fan-outs rebuild every object on the canvas, so one throw used to
+  // discard everyone else's payload too. A skipped object keeps its last saved
+  // state, which the merge in getNewAnnotations restores from the drawing.
+  const serializeCanvasObjects = serializer =>
+    fabricCanvas.value._objects
+      .map(obj => {
+        try {
+          return serializer(obj)
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error(
+            `[annotations] Object ${obj?.id} failed to serialize, skipped`,
+            err
+          )
+          return null
+        }
+      })
+      .filter(Boolean)
+
   const getNewAnnotations = (currentTime, currentFrame, annotation) => {
     fabricCanvas.value.getObjects().forEach(obj => {
       setObjectData(obj)
@@ -469,14 +563,9 @@ export const useAnnotation = ({
     })
 
     if (annotation) {
-      const canvasObjects = fabricCanvas.value._objects.map(obj => {
-        const result = obj.serialize()
-        if (obj.group) {
-          const group = obj.group
-          result.left = group.left + Math.round(group.width / 2) + obj.left
-          result.top = group.top + Math.round(group.height / 2) + obj.top
-          result.group = null
-        }
+      const canvasObjects = serializeCanvasObjects(obj => {
+        const result = serializeAbsolute(obj)
+        if (obj.group) result.group = null
         return result
       })
       // Fast navigation can run a save while this frame's previously-saved
@@ -505,7 +594,7 @@ export const useAnnotation = ({
           time: Math.max(currentTime, 0),
           frame: Math.max(currentFrame, 0),
           drawing: {
-            objects: fabricCanvas.value._objects.map(obj => obj.serialize())
+            objects: serializeCanvasObjects(obj => obj.serialize())
           }
         }
       })
@@ -538,7 +627,7 @@ export const useAnnotation = ({
     const token = mainLoadToken
     for (const obj of annotation.drawing.objects) {
       if (token !== mainLoadToken) return
-      const built = await addObjectToCanvas(annotation, obj, canvas)
+      const built = await buildObjectSafely(annotation, obj, canvas)
       if (token !== mainLoadToken) {
         if (built) (canvas || fabricCanvas.value).remove(built)
         return
@@ -555,10 +644,29 @@ export const useAnnotation = ({
     // Adding PSStrokes / shapes is async, so load sequentially and bail if a
     // clear (or newer load) superseded us — otherwise late adds repopulate a
     // canvas that was just cleared, leaving an incomplete/garbled overlay.
+    // Like the main-canvas path, an object whose async build was already in
+    // flight when the clear hit is removed right after it lands.
     const token = comparisonLoadToken
     for (const obj of annotation.drawing.objects) {
       if (token !== comparisonLoadToken) return
-      await addObjectToCanvas(annotation, obj, canvas)
+      const built = await buildObjectSafely(annotation, obj, canvas)
+      if (token !== comparisonLoadToken) {
+        if (built) canvas.remove(built)
+        return
+      }
+    }
+  }
+
+  // One corrupt object used to abort the rest of the frame: the load loops are
+  // un-awaited at every call site, so the throw was an invisible unhandled
+  // rejection and the remaining objects simply never appeared.
+  const buildObjectSafely = async (annotation, obj, canvas) => {
+    try {
+      return await addObjectToCanvas(annotation, obj, canvas)
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[annotations] Object ${obj?.id} failed to load`, err)
+      return null
     }
   }
 
@@ -745,12 +853,14 @@ export const useAnnotation = ({
     }
     if (isLaserModeOn.value) {
       // Laser strokes fade out locally and are broadcast as ephemeral
-      // events; they are intentionally not added to the additions stack.
+      // events (flagged so receivers fade them too); they are
+      // intentionally not added to the additions stack.
       fadeObject(o)
-      postAnnotationAddition(getCurrentTime(), o.serialize())
+      postAnnotationAddition(getCurrentTime(), o.serialize(), { laser: true })
     } else {
       addToAdditions(o)
       stackAddAction(obj)
+      clearUndoneOnUserAction()
     }
   }
 
@@ -781,13 +891,22 @@ export const useAnnotation = ({
       type: 'erase',
       targets: affected,
       removedTargets,
-      path
+      path,
+      time: getCurrentTime(),
+      projection: getCanvasProjection()
     })
     clearUndoneStack()
     saveAnnotationsCb()
   }
 
   const onObjectModified = event => {
+    // fabric fires object:modified from Canvas.clear() when an IText still
+    // in editing gets discarded (exitEditing on a changed text). That
+    // programmatic exit must not post an update: after a resize the canvas
+    // dimensions no longer match the object's live coordinates, and the
+    // serialization would corrupt the stored note (coordinates multiplied
+    // by the resize ratio, note rendered off-canvas for everyone).
+    if (silentAnnotation) return
     const movedObject = event.target
     if (!movedObject._objects) {
       addToUpdates(movedObject)
@@ -796,24 +915,23 @@ export const useAnnotation = ({
     } else {
       const group = movedObject
       group._objects.forEach(groupObj => {
-        const canvasObj = getObjectById(groupObj.id)
+        const canvasObj = getObjectById(groupObj.id) ?? groupObj
         setObjectData(canvasObj)
-        const targetObj = canvasObj.serialize()
-        const point = new Point(groupObj.left, groupObj.top)
-        const transformedPoint = util.transformPoint(
-          point,
-          group.calcTransformMatrix()
-        )
-        targetObj.left = transformedPoint.x
-        targetObj.top = transformedPoint.y
-        targetObj.angle += group.angle
-        targetObj.scaleX *= group.scaleX
-        targetObj.scaleY *= group.scaleY
-        addToUpdatesSerializedObject(targetObj)
+        addToUpdatesSerializedObject(serializeAbsolute(canvasObj))
       })
       saveAnnotationsCb()
     }
   }
+
+  // text:changed fires per keystroke and onObjectModified serializes the
+  // whole canvas and dispatches the store each time (plus one socket emit
+  // per keystroke in review rooms): batch it trailing-edge. The final
+  // state is never lost — exiting text editing fires object:modified
+  // directly. The canvas guard drops a pending call whose object was
+  // cleared away (preview or frame switch) while the debounce ran.
+  const onTextChangedDebounced = func.debounce(event => {
+    if (event.target?.canvas === fabricCanvas.value) onObjectModified(event)
+  }, 400)
 
   const onWindowsClosed = event => {
     if (notSaved.value) {
@@ -826,7 +944,69 @@ export const useAnnotation = ({
   // Undo / Redo
 
   const stackAddAction = ({ target }) => {
-    doneActionStack.push({ type: 'add', obj: target })
+    doneActionStack.push({
+      type: 'add',
+      obj: target,
+      time: getCurrentTime(),
+      projection: getCanvasProjection()
+    })
+  }
+
+  // History entries belong to the frame they were made on: replayed after
+  // a seek, they would graft objects onto the wrong frame's annotation
+  // entry (deltas are keyed on the CURRENT time). Such an entry is skipped,
+  // not dropped: it becomes replayable again once the user is back on its
+  // frame.
+  const isStaleAction = action =>
+    action?.time !== undefined && action.time !== getCurrentTime()
+
+  // Any NEW user action invalidates the redo stack (a kept one would
+  // replay stale history on top of the new state) — but not the re-adds
+  // and re-deletes performed by undo/redo themselves.
+  let replayingHistory = false
+  const clearUndoneOnUserAction = () => {
+    if (!replayingHistory) clearUndoneStack()
+  }
+
+  // An object sitting off the canvas (undone, waiting for its redo) keeps the
+  // coordinates it had for the box it was last projected onto: the reload that
+  // re-scales every live object can't reach it. Re-adding it as is after a
+  // resize would drop it at the old box's position, often outside the visible
+  // area. Map it from the box the entry recorded onto the live one, through its
+  // own canvasWidth reference frame.
+  const reprojectHistoryObject = (object, projection) => {
+    const canvas = fabricCanvas.value
+    if (!canvas || !projection?.width || !object?.canvasWidth) return object
+    if (
+      projection.width === canvas.width &&
+      projection.height === canvas.height
+    ) {
+      return object
+    }
+    const from = getAnnotationContainMapping(
+      projection,
+      object.canvasWidth,
+      object.canvasHeight
+    )
+    const to = getAnnotationContainMapping(
+      canvas,
+      object.canvasWidth,
+      object.canvasHeight
+    )
+    if (!from.scale || !to.scale) return object
+    const ratio = to.scale / from.scale
+    const values = {
+      left: (object.left - from.offsetX) * ratio + to.offsetX,
+      top: (object.top - from.offsetY) * ratio + to.offsetY,
+      scaleX: object.scaleX * ratio,
+      scaleY: object.scaleY * ratio
+    }
+    Object.entries(values).forEach(([key, value]) => {
+      if (object.set) object.set(key, value)
+      else object[key] = value
+    })
+    object.setCoords?.()
+    return object
   }
 
   // After a canvas reload (e.g. Esc-exit fullscreen) the stack entry
@@ -835,7 +1015,9 @@ export const useAnnotation = ({
   // whole, fall back to the stored reference.
   const resolveActionObject = action => {
     if (action.obj?._objects) return action.obj
-    return getObjectById(action.obj.id) ?? action.obj
+    const live = getObjectById(action.obj.id)
+    if (live) return live
+    return reprojectHistoryObject(action.obj, action.projection)
   }
 
   // Undo an erase: pop the last path off each affected object's eraser mask,
@@ -843,7 +1025,11 @@ export const useAnnotation = ({
   const undoEraseAction = action => {
     action.removed = []
     action.targets.forEach(t => {
-      const obj = getObjectById(t.id) ?? t
+      // A fully erased target waits off the canvas, where no reload can
+      // re-scale it: map the stored instance onto the live box, like
+      // resolveActionObject does for add / remove entries.
+      const obj =
+        getObjectById(t.id) ?? reprojectHistoryObject(t, action.projection)
       const paths = obj.eraser?.getObjects?.() ?? []
       if (!paths.length) return
       // Stash the id too: redo must re-resolve the live object, because a
@@ -872,6 +1058,16 @@ export const useAnnotation = ({
       addToUpdates(obj)
     })
     fabricCanvas.value?.requestRenderAll()
+    // Save like every other mutation path: the annotation entry is only
+    // re-serialized from the canvas during a save, and reloads (fullscreen
+    // exit, frame step) rebuild the canvas from that entry; without this
+    // the popped eraser path came back on the next reload.
+    if (action.removed.length) {
+      // The replayed instances now sit on the current box; re-stamp like
+      // undoLastAction does so the next fallback reprojects from it.
+      action.projection = getCanvasProjection()
+      saveAnnotationsCb()
+    }
   }
 
   // Redo an erase: push the stashed paths back onto each object's eraser,
@@ -892,54 +1088,88 @@ export const useAnnotation = ({
       }
     })
     fabricCanvas.value?.requestRenderAll()
+    // No projection re-stamp here: redo removes the LIVE instance and never
+    // moves the refs stashed in the action, whose coordinates still belong
+    // to the box the last undo left them on.
+    if (action.removed?.length) saveAnnotationsCb()
   }
 
   const undoLastAction = () => {
-    if (doneActionStack[doneActionStack.length - 1]?.type === 'erase') {
+    const lastAction = doneActionStack[doneActionStack.length - 1]
+    if (!lastAction) return
+    if (isStaleAction(lastAction)) return
+    replayingHistory = true
+    try {
+      if (lastAction.type === 'erase') {
+        const action = doneActionStack.pop()
+        undoEraseAction(action)
+        undoneActionStack.push(action)
+        return
+      }
       const action = doneActionStack.pop()
-      undoEraseAction(action)
+      if (!action?.obj) return
+      const obj = resolveActionObject(action)
+      // Snapshot length so the side-effect pushes addObject / deleteObject
+      // make (object:added → stackAddAction for re-adds, per-child remove
+      // for groups) are dropped before we move the action to the undone
+      // stack — otherwise undo grows the done stack instead of shrinking it.
+      const stackLengthBefore = doneActionStack.length
+      if (action.type === 'add') {
+        deleteObject(obj)
+        removeFromAdditions(obj)
+      } else if (action.type === 'remove') {
+        // addObject's 'object:added' already fires addToAdditions; no
+        // explicit call needed (it would double-record the addition).
+        addObject(obj)
+        removeFromDeletions(obj)
+      }
+      doneActionStack.length = stackLengthBefore
+      // Re-pin the entry on the instance that was actually replayed. A canvas
+      // reload (fullscreen transition, frame change) swaps every object for a
+      // fresh one scaled to the new canvas; the next replay can no longer look
+      // this one up (it is off-canvas) and would re-inject the pre-reload
+      // instance at its pre-reload position.
+      action.obj = obj
+      action.projection = getCanvasProjection()
       undoneActionStack.push(action)
-      return
+    } finally {
+      replayingHistory = false
     }
-    const action = doneActionStack.pop()
-    if (!action?.obj) return
-    const obj = resolveActionObject(action)
-    // Snapshot length so the side-effect pushes addObject / deleteObject
-    // make (object:added → stackAddAction for re-adds, per-child remove
-    // for groups) are dropped before we move the action to the undone
-    // stack — otherwise undo grows the done stack instead of shrinking it.
-    const stackLengthBefore = doneActionStack.length
-    if (action.type === 'add') {
-      deleteObject(obj)
-      removeFromAdditions(obj)
-    } else if (action.type === 'remove') {
-      // addObject's 'object:added' already fires addToAdditions; no
-      // explicit call needed (it would double-record the addition).
-      addObject(obj)
-      removeFromDeletions(obj)
-    }
-    doneActionStack.length = stackLengthBefore
-    undoneActionStack.push(action)
   }
 
   const redoLastAction = () => {
-    if (undoneActionStack[undoneActionStack.length - 1]?.type === 'erase') {
+    const lastUndone = undoneActionStack[undoneActionStack.length - 1]
+    if (!lastUndone) return
+    if (isStaleAction(lastUndone)) return
+    replayingHistory = true
+    try {
+      if (lastUndone.type === 'erase') {
+        const action = undoneActionStack.pop()
+        redoEraseAction(action)
+        doneActionStack.push(action)
+        return
+      }
       const action = undoneActionStack.pop()
-      redoEraseAction(action)
+      if (!action?.obj) return
+      const obj = resolveActionObject(action)
+      const stackLengthBefore = doneActionStack.length
+      if (action.type === 'add') {
+        // Mirror undoLastAction: without dropping the pending deletion the
+        // batch carries the same id as an addition AND as a deletion, and zou
+        // applies deletions last, so the annotation ends up erased server side.
+        addObject(obj)
+        removeFromDeletions(obj)
+      } else if (action.type === 'remove') {
+        deleteObject(obj)
+        removeFromAdditions(obj)
+      }
+      doneActionStack.length = stackLengthBefore
+      action.obj = obj
+      action.projection = getCanvasProjection()
       doneActionStack.push(action)
-      return
+    } finally {
+      replayingHistory = false
     }
-    const action = undoneActionStack.pop()
-    if (!action?.obj) return
-    const obj = resolveActionObject(action)
-    const stackLengthBefore = doneActionStack.length
-    if (action.type === 'add') {
-      addObject(obj)
-    } else if (action.type === 'remove') {
-      deleteObject(obj)
-    }
-    doneActionStack.length = stackLengthBefore
-    doneActionStack.push(action)
   }
 
   const clearUndoneStack = () => {
@@ -947,10 +1177,6 @@ export const useAnnotation = ({
   }
 
   // Canvas management
-
-  const deleteAllAnnotations = () => {
-    fabricCanvas.value._objects.forEach(deleteObject)
-  }
 
   const clearAnnotationSelection = () => {
     const canvas = fabricCanvas.value
@@ -999,7 +1225,7 @@ export const useAnnotation = ({
     fabricCanvas.value.off('mouse:up', onCanvasReleasedCb)
     fabricCanvas.value.on('object:moved', onObjectModified)
     fabricCanvas.value.on('object:modified', onObjectModified)
-    fabricCanvas.value.on('text:changed', onObjectModified)
+    fabricCanvas.value.on('text:changed', onTextChangedDebounced)
     fabricCanvas.value.on('object:added', onObjectAdded)
     fabricCanvas.value.on('erasing:end', onErasingEnd)
     fabricCanvas.value.on('mouse:down', initializeMouseDrawing)
@@ -1045,6 +1271,7 @@ export const useAnnotation = ({
         })
         addToAdditions(shape)
         stackAddAction({ target: shape })
+        clearUndoneOnUserAction()
         // Push the shape into annotations.value (and trigger the
         // backend save). The pencil flow gets this from `endDrawing`
         // via the canvas's mouse:up handler, but `endDrawing` only
@@ -1201,7 +1428,15 @@ export const useAnnotation = ({
     // don't land after this clear.
     mainLoadToken++
     if (isFabricReady(fabricCanvas.value)) {
-      fabricCanvas.value.clear()
+      // clear() discards the active object first, and discarding an IText
+      // still in editing fires object:modified while it is attached to the
+      // canvas: mute the handler so a programmatic wipe never posts updates.
+      silentAnnotation = true
+      try {
+        fabricCanvas.value.clear()
+      } finally {
+        silentAnnotation = false
+      }
     }
     clearComparisonCanvas()
   }
@@ -1224,10 +1459,17 @@ export const useAnnotation = ({
 
   // Add one ghost annotation's objects at the given opacity. Sequential
   // because object creation is async and addObjectToCanvas mutates shared
-  // state (so it can't run in parallel).
-  const renderOnionGhost = async (canvas, { annotation, opacity }) => {
+  // state (so it can't run in parallel). Token-checked around every await
+  // so a clear or a fresher load mid-ghost can't leave a partial ghost
+  // painted on the cleared canvas.
+  const renderOnionGhost = async (canvas, { annotation, opacity }, token) => {
     for (const obj of annotation.drawing.objects) {
+      if (token !== onionLoadToken) return
       const built = await addObjectToCanvas(annotation, obj, canvas)
+      if (token !== onionLoadToken) {
+        if (built) canvas.remove(built)
+        return
+      }
       built?.set('opacity', opacity)
     }
   }
@@ -1244,7 +1486,7 @@ export const useAnnotation = ({
     canvas.clear()
     for (const ghost of ghosts) {
       if (token !== onionLoadToken) return
-      await renderOnionGhost(canvas, ghost)
+      await renderOnionGhost(canvas, ghost, token)
     }
     if (token === onionLoadToken && isFabricReady(canvas)) {
       canvas.requestRenderAll()
@@ -1264,29 +1506,40 @@ export const useAnnotation = ({
       })
     } else {
       clipboard.copyAnnotations({
-        mainObject: Object.create(activeObject),
+        mainObject: activeObject,
         subObjects: []
       })
     }
     return activeObject
   }
 
-  const pasteAnnotations = () => {
+  // Pasting must produce REAL copies. Re-adding the source instances (or
+  // an Object.create wrapper inheriting the original's id) made every
+  // later move post an update under the ORIGINAL's id (server and remote
+  // viewers moved the original, the local duplicate vanished on reload)
+  // and stacked duplicate entries of one instance in fabric's _objects.
+  const PASTE_OFFSET = 10
+
+  const pasteAnnotations = async () => {
     if (!fabricCanvas.value) return
+    // Restores absolute coordinates on selection children before cloning.
     fabricCanvas.value.discardActiveObject()
     const { mainObject, subObjects } = clipboard.pasteAnnotations()
-    if (subObjects?.length > 0) {
-      subObjects.forEach(obj => {
-        obj = applyGroupChanges(mainObject, obj)
-        obj.group = null
-        addObject(obj)
-      })
-      fabricCanvas.value.requestRenderAll()
-    } else if (mainObject) {
-      addObject(mainObject)
-      fabricCanvas.value.setActiveObject(mainObject)
-      fabricCanvas.value.requestRenderAll()
+    const sources =
+      subObjects?.length > 0 ? subObjects : mainObject ? [mainObject] : []
+    let lastClone = null
+    for (const source of sources) {
+      const clone = await cloneAnnotationObject(source)
+      clone.set('id', uuidv4())
+      clone.set('left', clone.left + PASTE_OFFSET)
+      clone.set('top', clone.top + PASTE_OFFSET)
+      addObject(clone)
+      lastClone = clone
     }
+    if (lastClone && sources.length === 1) {
+      fabricCanvas.value.setActiveObject(lastClone)
+    }
+    fabricCanvas.value.requestRenderAll()
   }
 
   const applyGroupChanges = (group, obj) => {
@@ -1401,17 +1654,16 @@ export const useAnnotation = ({
   }
 
   // Render whatever is currently on the live fabric canvas onto the
-  // target canvas. Non-destructive: it draws the live canvas's pixels
-  // straight onto the target (scaled to fit), so objects stay on the
-  // live canvas — no per-object moves and no fabric "object belongs to
-  // a different canvas" warnings.
+  // target canvas. toCanvasElement re-renders the scene vectorially on
+  // an offscreen canvas at the target resolution, so strokes stay sharp
+  // (copying the display-sized live pixels would upscale and pixelate
+  // them) while the live objects are never moved: no fabric "object
+  // belongs to a different canvas" warnings.
   const compositeLiveAnnotationsOntoCanvas = canvas => {
     return new Promise(resolve => {
       const live = fabricCanvas.value
       if (!live) return resolve()
-      live.renderAll()
-      const source = live.lowerCanvasEl
-      if (!source) return resolve()
+      const source = live.toCanvasElement(canvas.width / live.getWidth())
       const context = canvas.getContext('2d')
       context.drawImage(source, 0, 0, canvas.width, canvas.height)
       resolve()
@@ -1454,6 +1706,7 @@ export const useAnnotation = ({
     onChangePencilColor,
     onChangePencilWidth,
     onChangeTextColor,
+    onChangeTextSize,
     _resetColor,
     _resetPencil,
     resetPencilConfiguration,
@@ -1470,6 +1723,7 @@ export const useAnnotation = ({
     pencilColor,
     pencilWidth,
     textColor,
+    textSize,
     showCanvas,
     localPreferences
   })
@@ -1532,6 +1786,7 @@ export const useAnnotation = ({
     pencilColor,
     pencilWidth,
     textColor,
+    textSize,
 
     // Objects
     findAnnotation,
@@ -1570,6 +1825,7 @@ export const useAnnotation = ({
     onChangePencilColor,
     onChangePencilWidth,
     onChangeTextColor,
+    onChangeTextSize,
     _resetColor,
     _resetPencil,
     resetPencilConfiguration,
@@ -1589,7 +1845,6 @@ export const useAnnotation = ({
     clearUndoneStack,
 
     // Canvas management
-    deleteAllAnnotations,
     clearAnnotationSelection,
     isAnnotationCanvas,
     setAnnotationCanvasDimensions,

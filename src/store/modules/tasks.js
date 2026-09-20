@@ -8,7 +8,12 @@ import {
   sortRevisionPreviewFiles,
   sortByName
 } from '@/lib/sorting'
-import { arrayMove, populateTask, removeModelFromList } from '@/lib/models'
+import {
+  arrayMove,
+  populateTask,
+  removeModelFromList,
+  setTasksEntityPreview
+} from '@/lib/models'
 import func from '@/lib/func'
 
 import assetStore from '@/store/modules/assets'
@@ -50,6 +55,7 @@ import {
   ADD_PREVIEW_END,
   CHANGE_PREVIEW_END,
   UPDATE_PREVIEW_ANNOTATION,
+  UPDATE_PREVIEW_VALIDATION_STATUS,
   ADD_SELECTED_TASK,
   ADD_SELECTED_TASKS,
   REMOVE_SELECTED_TASK,
@@ -178,6 +184,10 @@ const actions = {
 
   loadOpenTasks({}, filters) {
     return tasksApi.getOpenTasks(filters)
+  },
+
+  loadOpenTasksBurndown({}, filters) {
+    return tasksApi.getOpenTasksBurndown(filters)
   },
 
   subscribeToTask({ commit }, taskId) {
@@ -927,11 +937,10 @@ const actions = {
     return reply
   },
 
-  deleteReply({ commit }, { comment, reply }) {
+  async deleteReply({ commit }, { comment, reply }) {
+    await tasksApi.deleteReply(comment, reply)
     commit(REMOVE_REPLY_FROM_COMMENT, { comment, reply })
-    return tasksApi.deleteReply(comment, reply).then(() => {
-      return reply
-    })
+    return reply
   },
 
   pinComment({ commit }, comment) {
@@ -975,7 +984,6 @@ const mutations = {
     } else {
       state.taskSearchQueries = []
     }
-    state.tasks = Array.from(state.taskMap.values())
   },
 
   [LOAD_SHOTS_END](state, { production, userFilters }) {
@@ -1038,7 +1046,8 @@ const mutations = {
               revision: p.revision,
               position: p.position,
               duration: p.duration,
-              original_name: p.original_name
+              original_name: p.original_name,
+              validation_status: p.validation_status
             }
             return prev
           })
@@ -1094,12 +1103,18 @@ const mutations = {
     state.taskComments[task.id] = undefined
     state.taskPreviews[task.id] = undefined
     state.taskMap.delete(task.id)
-    const validationKey = `${task.entity_id}-${task.task_type_id}`
-    state.selectedValidations.set(validationKey, {
-      entity: { id: task.entity_id },
-      column: { id: task.task_type_id }
-    })
-    state.selectedTasks.delete(task.id)
+    // A selected task leaves its empty cell selected in its place. Any other
+    // deletion, a colleague's included, must not plant a selection: the next
+    // task creation would recreate the deleted task from it.
+    if (state.selectedTasks.delete(task.id)) {
+      const validationKey = `${task.entity_id}-${task.task_type_id}`
+      state.selectedValidations.set(validationKey, {
+        entity: { id: task.entity_id },
+        column: { id: task.task_type_id }
+      })
+      state.nbSelectedTasks = state.selectedTasks.size
+      state.nbSelectedValidations = state.selectedValidations.size
+    }
   },
 
   [DELETE_COMMENT_END](
@@ -1231,6 +1246,19 @@ const mutations = {
         p.previews.splice(index, 1)
       }
     })
+  },
+
+  // The player works on copies of the comment previews (see
+  // LOAD_TASK_COMMENTS_END), so both sides must be updated.
+  [UPDATE_PREVIEW_VALIDATION_STATUS](state, { previewFile, status }) {
+    const taskId = previewFile.task_id
+    const subPreviews = [
+      ...(state.taskComments[taskId] || []).flatMap(c => c.previews || []),
+      ...(state.taskPreviews[taskId] || []).flatMap(p => p.previews || [])
+    ]
+    subPreviews
+      .filter(p => p.id === previewFile.id)
+      .forEach(p => (p.validation_status = status))
   },
 
   [UPDATE_PREVIEW_ANNOTATION](state, { taskId, preview, annotations }) {
@@ -1378,7 +1406,13 @@ const mutations = {
   [EDIT_TASK_DATES](state, { taskId, data }) {
     const task = state.taskMap.get(taskId)
     if (task) {
-      Object.assign(task, data)
+      const { data: metadata, ...taskFields } = data
+      Object.assign(task, taskFields)
+      // Mirror the server-side merge of the metadata bag instead of
+      // replacing it wholesale.
+      if (metadata) {
+        task.data = { ...(task.data || {}), ...metadata }
+      }
     }
   },
 
@@ -1407,10 +1441,11 @@ const mutations = {
     }
   },
 
-  [SET_PREVIEW](state, { taskId, previewId }) {
-    if (state.taskMap.get(taskId)?.entity) {
-      state.taskMap.get(taskId).entity.preview_file_id = previewId
-    }
+  // REGISTER_USER_TASKS registers the todo, done and to-check lists into the
+  // map as the very objects those pages render, so sweeping it refreshes them
+  // all, including the my-checks tasks held in component state.
+  [SET_PREVIEW](state, { entityId, previewId }) {
+    setTasksEntityPreview(state.taskMap, entityId, previewId)
   },
 
   [SET_IS_BIG_THUMBNAILS](state, isBigThumbnails) {
@@ -1427,7 +1462,7 @@ const mutations = {
 
   [LOAD_PERSON_TASKS_END](state, { tasks }) {
     tasks.forEach(task => {
-      if (task.last_comment.person_id) {
+      if (task.last_comment?.person_id) {
         const person = helpers.getPerson(task.last_comment.person_id)
         task.last_comment.person = person
       }
@@ -1438,7 +1473,7 @@ const mutations = {
 
   [REGISTER_USER_TASKS](state, { tasks }) {
     tasks.forEach(task => {
-      if (task.last_comment.person_id) {
+      if (task.last_comment?.person_id) {
         const person = helpers.getPerson(task.last_comment.person_id)
         task.last_comment.person = person
       }
@@ -1512,6 +1547,7 @@ const mutations = {
       const localComment = state.taskComments[comment.object_id].find(
         c => c.id === comment.id
       )
+      if (!localComment) return
       localComment.checklist = [...checklist]
     }
   },
@@ -1521,6 +1557,11 @@ const mutations = {
       const localComment = state.taskComments[comment.object_id].find(
         c => c.id === comment.id
       )
+      if (!localComment) return
+      // Raw replies only carry person_id, so the author has to be resolved
+      // here too. Without it a reply arriving through the realtime event
+      // renders with a broken avatar until the page is reloaded.
+      helpers.enrichCommentAuthors(comment)
       localComment.replies = comment.replies
     }
   },
@@ -1539,14 +1580,16 @@ const mutations = {
   },
 
   [ADD_ATTACHMENT_TO_COMMENT](state, { comment, attachmentFiles }) {
-    const oldComment = state.taskComments[comment.object_id].find(
+    const oldComment = state.taskComments[comment.object_id]?.find(
       c => c.id === comment.id
     )
     if (!comment.attachment_files) {
       comment.attachment_files = []
     }
-    oldComment.attachment_files =
-      oldComment.attachment_files.concat(attachmentFiles)
+    if (!oldComment) return
+    oldComment.attachment_files = (oldComment.attachment_files ?? []).concat(
+      attachmentFiles
+    )
   },
 
   [REMOVE_ATTACHMENT_FROM_COMMENT](state, { comment, attachment }) {
@@ -1603,7 +1646,9 @@ const mutations = {
   },
 
   [SET_TASK_EXTRA_DATA](state, { task, data }) {
-    task.data = data
+    // Linked entity metadata lands in entity_data: task.data holds the
+    // task's own metadata and must not be shadowed by the entity's.
+    task.entity_data = data
   },
 
   [RESET_ALL](state) {

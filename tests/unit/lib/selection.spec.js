@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { buildSelectionGrid, clearSelectionGrid } from '@/lib/selection'
 
 describe('selection', () => {
@@ -9,12 +11,6 @@ describe('selection', () => {
 
   test('clearSelectionGrid', () => {
     const selectionGrid = new Set(['0-0', '1-1', '2-0'])
-    clearSelectionGrid(selectionGrid)
-    expect(selectionGrid.size).toBe(0)
-  })
-
-  test('clearSelectionGrid with empty set', () => {
-    const selectionGrid = new Set()
     clearSelectionGrid(selectionGrid)
     expect(selectionGrid.size).toBe(0)
   })

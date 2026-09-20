@@ -52,8 +52,8 @@
         <div class="group-header">
           <span
             class="dot"
-            :style="{ borderColor: getDepartment(group).color }"
-            :title="getDepartment(group).name"
+            :style="{ borderColor: getDepartment(group)?.color }"
+            :title="getDepartment(group)?.name"
             v-if="group.is_shared && group.department_id"
           ></span>
           <span>{{ group.name }}</span>
@@ -150,8 +150,8 @@
       >
         <span
           class="dot"
-          :style="{ borderColor: getDepartment(searchQuery).color }"
-          :title="getDepartment(searchQuery).name"
+          :style="{ borderColor: getDepartment(searchQuery)?.color }"
+          :title="getDepartment(searchQuery)?.name"
           v-if="searchQuery.is_shared && searchQuery.department_id"
         ></span>
         {{ searchQuery.name }}
@@ -173,16 +173,18 @@
     </span>
 
     <confirm-modal
-      :active="modals.remove"
+      active
+      is-danger
       :is-loading="loading.remove"
       :is-error="errors.remove"
       :text="removeText"
       @cancel="modals.remove = false"
       @confirm="removeSearch"
+      v-if="modals.remove"
     />
 
     <edit-search-filter-modal
-      :active="modals.edit"
+      active
       :group-options="groupOptions"
       :is-loading="loading.edit"
       :is-error="errors.edit"
@@ -190,15 +192,17 @@
       :search-query-to-edit="searchQueryToEdit"
       @cancel="modals.edit = false"
       @confirm="confirmEditSearch"
+      v-if="modals.edit"
     />
 
     <edit-search-filter-group-modal
-      :active="modals.group"
+      active
       :is-loading="loading.group"
       :is-error="errors.group"
       :group-to-edit="groupToEdit"
       @cancel="modals.group = false"
       @confirm="confirmEditFilterGroup"
+      v-if="modals.group"
     />
   </div>
 </template>
@@ -245,6 +249,13 @@ const props = defineProps({
   type: {
     type: String,
     required: true
+  },
+  // Production the listed searches belong to. Left unset by
+  // cross-production consumers (Todos, People, Person), which keep the
+  // global role.
+  productionId: {
+    type: String,
+    default: null
   }
 })
 
@@ -276,7 +287,13 @@ const toggleGroupId = ref(null)
 const currentProduction = computed(() => store.getters.currentProduction)
 const departmentMap = computed(() => store.getters.departmentMap)
 const isCurrentUserClient = computed(() => store.getters.isCurrentUserClient)
-const isCurrentUserManager = computed(() => store.getters.isCurrentUserManager)
+const isCurrentUserManager = computed(() =>
+  props.productionId
+    ? store.getters.isCurrentUserAdmin ||
+      store.getters.currentUserRoleForProduction(props.productionId) ===
+        'manager'
+    : store.getters.isCurrentUserManager
+)
 const personMap = computed(() => store.getters.personMap)
 
 const sortedFilters = computed(() => {

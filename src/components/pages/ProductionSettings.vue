@@ -104,7 +104,7 @@
 
       <div class="tab" v-show="isActiveTab('assetTypes')">
         <asset-type-settings
-          :asset-types="productionAssetTypes"
+          :asset-types="restrictedAssetTypes"
           :all-asset-types="assetTypes"
           @add="addAssetType"
           @import-items="importAssetTypes"
@@ -239,8 +239,18 @@ const taskStatusId = ref('')
 
 const assetTypes = computed(() => store.getters.assetTypes)
 const currentProduction = computed(() => store.getters.currentProduction)
-const isCurrentUserManager = computed(() => store.getters.isCurrentUserManager)
-const productionAssetTypes = computed(() => store.getters.productionAssetTypes)
+const isCurrentUserProductionManager = computed(
+  () => store.getters.isCurrentUserProductionManager
+)
+// The asset-type tab edits the production's explicit restriction set, so it
+// shows the raw asset_types (empty = no restriction). productionAssetTypes
+// can't be used here: it expands an empty list to every asset type, which
+// made removing the last type repaint the whole list and blocked removal.
+const restrictedAssetTypes = computed(() => {
+  const ids = currentProduction.value?.asset_types
+  if (!ids?.length) return []
+  return assetTypes.value.filter(assetType => ids.includes(assetType.id))
+})
 const productionTaskStatuses = computed(
   () => store.getters.productionTaskStatuses
 )
@@ -325,7 +335,7 @@ useHead({
 })
 
 onMounted(() => {
-  if (!isCurrentUserManager.value) {
+  if (!isCurrentUserProductionManager.value) {
     router.push({ name: 'not-found' })
     return
   }

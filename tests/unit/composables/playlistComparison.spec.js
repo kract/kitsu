@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { computed, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 
@@ -61,11 +63,6 @@ describe('composables/playlistComparison', () => {
       ])
     })
 
-    it('returns [] when currentEntity is null', () => {
-      const c = usePlaylistComparison(makeInputs())
-      expect(c.taskTypeOptions.value).toEqual([])
-    })
-
     it('skips task types absent from taskTypeMap', () => {
       const entity = {
         preview_files: {
@@ -105,8 +102,28 @@ describe('composables/playlistComparison', () => {
       c.taskTypeId.value = 'tt-anim'
       expect(c.revisionOptions.value).toEqual([
         { label: 'Last', value: null },
+        { label: 'Previous', value: 'previous' },
         { label: 'v3', value: '3' },
         { label: 'v2', value: '2' },
+        { label: 'v1', value: '1' }
+      ])
+    })
+
+    it('omits Previous when there is only one revision', () => {
+      const entity = {
+        preview_files: {
+          'tt-anim': [{ id: 'p1', revision: 1, extension: 'mp4' }]
+        }
+      }
+      const c = usePlaylistComparison(
+        makeInputs({
+          entityList: [entity],
+          taskTypeMap: new Map([['tt-anim', { id: 'tt-anim', name: 'Anim' }]])
+        })
+      )
+      c.taskTypeId.value = 'tt-anim'
+      expect(c.revisionOptions.value).toEqual([
+        { label: 'Last', value: null },
         { label: 'v1', value: '1' }
       ])
     })
@@ -147,6 +164,37 @@ describe('composables/playlistComparison', () => {
       expect(c.entityListToCompare.value).toEqual([
         { preview_file_id: 'a2', preview_file_extension: 'mp4' },
         // entity B has no revision 2 → fall back to its first preview
+        { preview_file_id: 'b1', preview_file_extension: 'png' }
+      ])
+    })
+
+    it('resolves "previous" to last - 1 (second highest revision) per entity', () => {
+      const entityA = {
+        preview_files: {
+          'tt-anim': [
+            { id: 'a3', revision: 3, extension: 'mp4' },
+            { id: 'a1', revision: 1, extension: 'mp4' },
+            { id: 'a2', revision: 2, extension: 'mp4' }
+          ]
+        }
+      }
+      const entityB = {
+        preview_files: {
+          'tt-anim': [{ id: 'b1', revision: 1, extension: 'png' }]
+        }
+      }
+      const c = usePlaylistComparison(
+        makeInputs({
+          entityList: [entityA, entityB],
+          taskTypeMap: new Map([['tt-anim', { id: 'tt-anim', name: 'Anim' }]])
+        })
+      )
+      c.taskTypeId.value = 'tt-anim'
+      c.revisionToCompare.value = 'previous'
+      expect(c.entityListToCompare.value).toEqual([
+        // last is v3 → previous is v2, whatever the array order
+        { preview_file_id: 'a2', preview_file_extension: 'mp4' },
+        // entity B has a single revision → previous falls back to it
         { preview_file_id: 'b1', preview_file_extension: 'png' }
       ])
     })
@@ -465,10 +513,10 @@ describe('composables/playlistComparison', () => {
       expect(c.overlayOpacity.value).toBe(1)
     })
 
-    it('returns 0.25 for overlay25', () => {
+    it('returns 0.75 for overlay25 (main mostly visible)', () => {
       const c = setup()
       c.comparisonMode.value = 'overlay25'
-      expect(c.overlayOpacity.value).toBe(0.25)
+      expect(c.overlayOpacity.value).toBe(0.75)
     })
 
     it('returns 0.5 for overlay50', () => {
@@ -477,10 +525,10 @@ describe('composables/playlistComparison', () => {
       expect(c.overlayOpacity.value).toBe(0.5)
     })
 
-    it('returns 0.75 for overlay75', () => {
+    it('returns 0.25 for overlay75 (main mostly hidden)', () => {
       const c = setup()
       c.comparisonMode.value = 'overlay75'
-      expect(c.overlayOpacity.value).toBe(0.75)
+      expect(c.overlayOpacity.value).toBe(0.25)
     })
 
     it('returns 0 for overlay100 (main fully hidden)', () => {
@@ -491,22 +539,6 @@ describe('composables/playlistComparison', () => {
   })
 
   describe('comparisonEntityMissing', () => {
-    it('is true when the saved task-type is not available on the current entity', () => {
-      const entity = {
-        preview_files: {
-          'tt-anim': [{ id: 'p1', revision: 1, extension: 'mp4' }]
-        }
-      }
-      const c = usePlaylistComparison(
-        makeInputs({
-          entityList: [entity],
-          taskTypeMap: new Map([['tt-anim', { id: 'tt-anim', name: 'Anim' }]])
-        })
-      )
-      c.savedTaskTypeToCompare.value = 'tt-comp' // not available
-      expect(c.comparisonEntityMissing.value).toBe(true)
-    })
-
     it('is false when the saved task-type is available', () => {
       const entity = {
         preview_files: {

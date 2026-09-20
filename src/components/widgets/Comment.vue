@@ -36,6 +36,7 @@
             {{ shortDate }}
           </span>
           <div
+            ref="menuWrapper"
             class="flexrow-item menu-wrapper"
             v-if="
               isPinnable || isEditable || canToggleForClient || canMoveComment
@@ -55,7 +56,6 @@
               :is-editable="isEditable"
               :can-toggle-for-client="canToggleForClient"
               :can-move="canMoveComment"
-              :is-for-client="Boolean(comment.for_client)"
               @pin-clicked="
                 () => {
                   emit('pin-comment', comment)
@@ -142,25 +142,25 @@
               <attachment-image
                 v-for="attachment in pictureAttachments"
                 :key="attachment.id"
-                :src="getDownloadAttachmentPath(attachment)"
+                :src="attachmentPath(attachment)"
                 :name="attachment.name"
               />
               <attachment-audio-player
                 v-for="attachment in audioAttachments"
                 :key="attachment.id"
-                :src="getDownloadAttachmentPath(attachment)"
+                :src="attachmentPath(attachment)"
                 :name="attachment.name"
-                :download-href="getDownloadAttachmentPath(attachment)"
+                :download-href="attachmentPath(attachment)"
               />
               <attachment-video-player
                 v-for="attachment in videoAttachments"
                 :key="attachment.id"
-                :src="getDownloadAttachmentPath(attachment)"
+                :src="attachmentPath(attachment)"
                 :name="attachment.name"
-                :download-href="getDownloadAttachmentPath(attachment)"
+                :download-href="attachmentPath(attachment)"
               />
               <a
-                :href="getDownloadAttachmentPath(attachment)"
+                :href="attachmentPath(attachment)"
                 :key="attachment.id"
                 :title="attachment.name"
                 class="attachment-file-link"
@@ -208,7 +208,7 @@
                     @keydown.enter.prevent="onDeleteReplyClicked(replyComment)"
                     @keydown.space.prevent="onDeleteReplyClicked(replyComment)"
                     v-if="
-                      isCurrentUserAdmin || replyComment.person_id === user.id
+                      isCurrentUserAdmin || replyComment.person_id === user?.id
                     "
                   >
                     x
@@ -234,27 +234,27 @@
                     v-for="attachment in replyAttachmentMap.get(replyComment.id)
                       ?.pictures"
                     :key="attachment.id"
-                    :src="getDownloadAttachmentPath(attachment)"
+                    :src="attachmentPath(attachment)"
                     :name="attachment.name"
                   />
                   <attachment-audio-player
                     v-for="attachment in replyAttachmentMap.get(replyComment.id)
                       ?.audio"
                     :key="attachment.id"
-                    :src="getDownloadAttachmentPath(attachment)"
+                    :src="attachmentPath(attachment)"
                     :name="attachment.name"
-                    :download-href="getDownloadAttachmentPath(attachment)"
+                    :download-href="attachmentPath(attachment)"
                   />
                   <attachment-video-player
                     v-for="attachment in replyAttachmentMap.get(replyComment.id)
                       ?.video"
                     :key="attachment.id"
-                    :src="getDownloadAttachmentPath(attachment)"
+                    :src="attachmentPath(attachment)"
                     :name="attachment.name"
-                    :download-href="getDownloadAttachmentPath(attachment)"
+                    :download-href="attachmentPath(attachment)"
                   />
                   <a
-                    :href="getDownloadAttachmentPath(attachment)"
+                    :href="attachmentPath(attachment)"
                     :key="attachment.id"
                     :title="attachment.name"
                     class="attachment-file-link"
@@ -451,9 +451,9 @@
         </a>
         <span
           class="flexrow-item preview-status"
-          :class="{ pointer: isCurrentUserManager }"
-          :title="comment.previews[0].validation_status"
-          :data-status="comment.previews[0].validation_status"
+          :class="{ pointer: canValidatePreviews }"
+          :title="revisionValidationStatus"
+          :data-status="revisionValidationStatus"
           role="button"
           tabindex="0"
           @click="changePreviewValidationStatus(comment.previews)"
@@ -486,7 +486,11 @@
         <span class="flexrow-item date" :title="fullDate">
           {{ shortDate }}
         </span>
-        <div class="flexrow-item menu-wrapper" v-if="isPinnable || isEditable">
+        <div
+          ref="menuWrapper"
+          class="flexrow-item menu-wrapper"
+          v-if="isPinnable || isEditable"
+        >
           <button
             type="button"
             class="menu-icon-button"
@@ -559,7 +563,11 @@ import {
 
 import files from '@/lib/files'
 import { remove } from '@/lib/models'
-import { getDownloadAttachmentPath, pluralizeEntityType } from '@/lib/path'
+import {
+  getDownloadAttachmentPath,
+  getTaskRouteEntity,
+  pluralizeEntityType
+} from '@/lib/path'
 import { renderComment, replaceTimeWithTimecode, safeUrl } from '@/lib/render'
 import { sortByName } from '@/lib/sorting'
 import {
@@ -571,6 +579,7 @@ import {
 import stringHelpers from '@/lib/string'
 
 import { useAtMentionsMembers } from '@/composables/atMentions'
+import { useTime } from '@/composables/time'
 import { domMixin } from '@/components/mixins/dom'
 
 import AddAttachmentModal from '@/components/modals/AddAttachmentModal.vue'
@@ -590,6 +599,7 @@ const { pauseEvent } = domMixin.methods
 
 const store = useStore()
 const route = useRoute()
+const { timezone } = useTime()
 
 const emit = defineEmits([
   'ack-comment',
@@ -607,6 +617,10 @@ const props = defineProps({
   comment: {
     type: Object,
     default: () => {}
+  },
+  urlPrefix: {
+    type: String,
+    default: ''
   },
   frame: {
     type: Number,
@@ -660,6 +674,7 @@ const props = defineProps({
 
 const replyRef = ref(null)
 const addAttachmentModalRef = ref(null)
+const menuWrapper = ref(null)
 
 const { membersForAts, atOptionsFilter } = useAtMentionsMembers(
   () => props.team,
@@ -685,11 +700,23 @@ const departmentMap = computed(() => store.getters.departmentMap)
 const isCurrentUserAdmin = computed(() => store.getters.isCurrentUserAdmin)
 const isCurrentUserArtist = computed(() => store.getters.isCurrentUserArtist)
 const isCurrentUserClient = computed(() => store.getters.isCurrentUserClient)
-const isCurrentUserManager = computed(() => store.getters.isCurrentUserManager)
+// Resolved against the comment's own task, not currentProduction: TaskInfo
+// (this widget's main host) can be shown outside a matching production
+// route (Todos, MyChecks, ...).
+const isCurrentUserManager = computed(() =>
+  props.task?.project_id
+    ? isCurrentUserAdmin.value ||
+      store.getters.currentUserRoleForProduction(props.task.project_id) ===
+        'manager'
+    : store.getters.isCurrentUserManager
+)
+const canValidatePreviews = computed(() =>
+  store.getters.canValidatePreviewFiles(props.task)
+)
 const personMap = computed(() => store.getters.personMap)
 const taskTypeMap = computed(() => store.getters.taskTypeMap)
-const use12HourClock = computed(() => store.getters.use12HourClock)
 const user = computed(() => store.getters.user)
+const use12HourClock = computed(() => store.getters.use12HourClock)
 
 const attachmentNamePrefix = computed(() =>
   stringHelpers.attachmentNamePrefix(
@@ -748,7 +775,7 @@ const previewRoute = computed(() => {
     r.params.episode_id = props.task.entity.episode_id
   }
   const taskType = taskTypeMap.value.get(props.task.task_type_id)
-  r.params.type = pluralizeEntityType(taskType.for_entity)
+  r.params.type = pluralizeEntityType(getTaskRouteEntity(props.task, taskType))
   return r
 })
 
@@ -766,6 +793,13 @@ const commentAttachments = computed(() => {
     attachment => !attachment.reply_id
   )
 })
+
+// Shared playlist guests have no JWT: the regular attachment route 401s
+// for them. When a urlPrefix is set, use its anonymous token route.
+const attachmentPath = attachment =>
+  props.urlPrefix
+    ? `${props.urlPrefix}/attachment-files/${attachment.id}/file/${attachment.name}`
+    : getDownloadAttachmentPath(attachment)
 
 const pictureAttachments = computed(() => {
   return commentAttachments.value
@@ -830,7 +864,7 @@ const commentDate = computed(() => {
 })
 
 const fullDate = computed(() => {
-  const date = commentDate.value.tz(user.value.timezone)
+  const date = commentDate.value.tz(timezone.value)
   return `${formatDisplayDate(date, dateFormat.value)} ${formatTimeOfDay(date, use12HourClock.value)}`
 })
 
@@ -854,7 +888,7 @@ const shortenText = (text, length) => {
 }
 
 const replyFullDate = date => {
-  const d = moment(parseDate(date)).tz(user.value.timezone)
+  const d = moment(parseDate(date)).tz(timezone.value)
   return `${formatDisplayDate(d, dateFormat.value)} ${formatTimeOfDay(d, use12HourClock.value)}`
 }
 
@@ -865,14 +899,20 @@ const replyShortDate = date => {
 const renderDate = date => {
   date = moment(date)
   if (moment().isSame(date, 'd')) {
-    return formatTimeOfDay(date.tz(user.value.timezone), use12HourClock.value)
+    return formatTimeOfDay(date.tz(timezone.value), use12HourClock.value)
   } else {
-    return formatShortDate(date.tz(user.value.timezone), dateFormat.value)
+    return formatShortDate(date.tz(timezone.value), dateFormat.value)
   }
 }
 
 const toggleCommentMenu = () => {
   menuVisible.value = !menuVisible.value
+}
+
+const onDocumentClick = event => {
+  if (!menuWrapper.value?.contains(event.target)) {
+    menuVisible.value = false
+  }
 }
 
 const removeTask = entry => {
@@ -909,8 +949,19 @@ const onChecklistTimecodeClicked = data => {
   })
 }
 
+// Aggregate of the revision files: validated wins as soon as one file is,
+// rejected only when every file is.
+const revisionValidationStatus = computed(() => {
+  const statuses = (props.comment.previews || []).map(p => p.validation_status)
+  if (statuses.includes('validated')) return 'validated'
+  if (statuses.length && statuses.every(s => s === 'rejected')) {
+    return 'rejected'
+  }
+  return 'neutral'
+})
+
 const changePreviewValidationStatus = previewFiles => {
-  if (!isCurrentUserManager.value) {
+  if (!canValidatePreviews.value) {
     return
   }
   const statusMap = {
@@ -918,7 +969,7 @@ const changePreviewValidationStatus = previewFiles => {
     rejected: 'neutral',
     neutral: 'validated'
   }
-  const status = statusMap[previewFiles[0].validation_status] || 'validated'
+  const status = statusMap[revisionValidationStatus.value] || 'validated'
   previewFiles.forEach(previewFile => {
     store.dispatch('updatePreviewFileValidationStatus', { previewFile, status })
   })
@@ -1037,6 +1088,7 @@ onBeforeUnmount(() => {
     }
   )
   window.removeEventListener('paste', onPaste, false)
+  document.removeEventListener('click', onDocumentClick)
 })
 
 watch(
@@ -1054,6 +1106,11 @@ watch(checklistItems, () => {
   if (!silent) {
     onChecklistChanged()
   }
+})
+
+watch(menuVisible, visible => {
+  const method = visible ? 'addEventListener' : 'removeEventListener'
+  document[method]('click', onDocumentClick)
 })
 </script>
 

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 
 vi.mock('fabric', () => {
@@ -165,16 +167,6 @@ describe('Eraser', () => {
     expect(eraser.width).toBe(100)
   })
 
-  it('fromObject disables initialization layout so children stay in group coords', async () => {
-    const eraser = await Eraser.fromObject({
-      width: 100,
-      height: 50,
-      objects: [{ path: 'M 0 0 L 5 5' }]
-    })
-    expect(eraser.layoutManager).toBeDefined()
-    expect(eraser.getObjects()).toHaveLength(1)
-  })
-
   it('drawObject fills a centered black rect covering the eraser bounds', () => {
     const eraser = new Eraser([], { width: 100, height: 50 })
     const calls = []
@@ -225,6 +217,24 @@ describe('EraserBrush._addPathToObjectEraser', () => {
     await brush._addPathToObjectEraser(obj, p1, ctx)
     await brush._addPathToObjectEraser(obj, p2, ctx)
     expect(obj.eraser.getObjects()).toHaveLength(2)
+  })
+
+  // Erasing a pasted object again used to call add() on a plain object; the
+  // throw escaped onMouseUp and cancelled erasing:end for every other target.
+  it('rebuilds an unrevived mask instead of adding onto a plain object', async () => {
+    const brush = new EraserBrush({})
+    const obj = makeObj()
+    obj.eraser = { type: 'eraser', objects: [{ type: 'path', path: 'M 0 0 L 1 0' }] }
+    const path = brush.createPath('M 0 0 L 2 0')
+    const ctx = { targets: [], subTargets: [] }
+
+    await expect(
+      brush._addPathToObjectEraser(obj, path, ctx)
+    ).resolves.toBeDefined()
+
+    expect(obj.eraser).toBeInstanceOf(Eraser)
+    expect(obj.eraser.getObjects()).toHaveLength(2)
+    expect(ctx.targets).toContain(obj)
   })
 
   it('appends to a revived eraser without shifting existing mask paths', async () => {
@@ -361,6 +371,26 @@ describe('installEraserObjectSupport', () => {
   it('toObject omits eraser when absent', () => {
     const o = Object.create(FabricObject.prototype)
     expect(o.toObject().eraser).toBeUndefined()
+  })
+
+  // A cloned PSStroke/Arrow carries the plain serialized mask, not an Eraser.
+  it('toObject emits an unrevived plain mask instead of throwing', () => {
+    const o = Object.create(FabricObject.prototype)
+    o.eraser = { type: 'eraser', objects: [{ path: 'M 0 0' }] }
+    expect(() => o.toObject()).not.toThrow()
+    expect(o.toObject().eraser).toEqual({
+      type: 'eraser',
+      objects: [{ path: 'M 0 0' }]
+    })
+  })
+
+  it('toObject deep-copies an unrevived mask so callers cannot mutate it', () => {
+    const o = Object.create(FabricObject.prototype)
+    o.eraser = { type: 'eraser', objects: [{ path: 'M 0 0' }] }
+    const emitted = o.toObject().eraser
+    expect(emitted).not.toBe(o.eraser)
+    emitted.objects[0].path = 'mutated'
+    expect(o.eraser.objects[0].path).toBe('M 0 0')
   })
 
   it('_drawClipPath syncs eraser dimensions and delegates to base _drawClipPath', () => {

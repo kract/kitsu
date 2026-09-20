@@ -73,6 +73,8 @@ import {
   LOAD_PLUGINS_END,
   SET_NOTIFICATION_COUNT,
   SET_USER_LIMIT,
+  SET_USER_PROJECT_ROLE,
+  SET_USER_PROJECT_ROLES,
   LOAD_OPEN_PRODUCTIONS_END,
   RESET_ALL,
   SET_CURRENT_PRODUCTION
@@ -93,6 +95,9 @@ const cache = {
 const initialState = {
   user: null,
   isAuthenticated: false,
+  // projectId -> explicit role of the current user on that production,
+  // absent entries mean the global role applies (from the user context)
+  projectRoles: {},
 
   avatarFormData: null,
   isSaveProfileLoading: false,
@@ -143,6 +148,35 @@ const getters = {
     state.user && state.user.role === 'supervisor',
   isCurrentUserClient: state => state.user && state.user.role === 'client',
   isCurrentUserVendor: state => state.user && state.user.role === 'vendor',
+
+  // Role the user effectively holds on given production: the per-project
+  // role when one is set, the global role otherwise.
+  currentUserRoleForProduction: state => productionId => {
+    if (!state.user) return null
+    return (productionId && state.projectRoles[productionId]) || state.user.role
+  },
+  currentUserEffectiveRole: (state, getters, rootState) =>
+    getters.currentUserRoleForProduction(
+      rootState.productions.currentProduction?.id
+    ),
+  isCurrentUserProductionManager: (state, getters) =>
+    state.user?.role === 'admin' ||
+    getters.currentUserEffectiveRole === 'manager',
+  isCurrentUserProductionSupervisor: (state, getters) =>
+    getters.currentUserEffectiveRole === 'supervisor',
+  // Mirrors zou: managers of the production, and supervisors of the task
+  // department (a supervisor without department supervises everything).
+  canValidatePreviewFiles: (state, getters, rootState, rootGetters) => task => {
+    if (!state.user) return false
+    const role = getters.currentUserRoleForProduction(task?.project_id)
+    if (state.user.role === 'admin' || role === 'manager') return true
+    if (role !== 'supervisor') return false
+    const departments = state.user.departments || []
+    const taskType = rootGetters.taskTypeMap.get(task?.task_type_id)
+    return (
+      departments.length === 0 || departments.includes(taskType?.department_id)
+    )
+  },
   use12HourClock: state => Boolean(state.user?.use_12_hour_clock),
   isSaveProfileLoading: state => state.isSaveProfileLoading,
   isSaveProfileLoadingError: state => state.isSaveProfileLoadingError,
@@ -297,22 +331,31 @@ const actions = {
     }
   },
 
+  // pget resolves null on a 2xx response that carries no JSON body (proxy
+  // maintenance page): default these lists so the mutations can iterate.
   async loadDoneTasks({ commit, state, rootGetters }) {
-    const doneTasks = await peopleApi.loadDone()
+    const doneTasks = (await peopleApi.loadDone()) || []
     commit(USER_LOAD_DONE_TASKS_END, doneTasks)
     commit(REGISTER_USER_TASKS, { tasks: doneTasks })
     return doneTasks
   },
 
   async loadUserTimeSpents({ commit }, { date }) {
-    const timeSpents = await peopleApi.loadTimeSpents(date)
+    const timeSpents = (await peopleApi.loadTimeSpents(date)) || []
     commit(USER_LOAD_TIME_SPENTS_END, timeSpents)
   },
 
-  async loadTasksToCheck({ commit }) {
-    const tasks = await peopleApi.loadTasksToCheck()
-    commit(REGISTER_USER_TASKS, { tasks })
-    return tasks
+  async loadTasksToCheck({ commit }, params = {}) {
+    const result = (await peopleApi.loadTasksToCheck({
+      ...params,
+      page: params.page || 1
+    })) || { data: [], stats: { total: 0 }, is_more: false }
+    commit(REGISTER_USER_TASKS, { tasks: result.data })
+    return result
+  },
+
+  loadTasksToCheckFilterValues() {
+    return peopleApi.loadTasksToCheckFilterValues()
   },
 
   async uploadAvatar({ commit, state }, formData) {
@@ -391,6 +434,7 @@ const actions = {
       commit(LOAD_ASSET_TYPES_END, context.asset_types)
       commit(SET_NOTIFICATION_COUNT, context.notification_count)
       commit(SET_USER_LIMIT, context.user_limit)
+      commit(SET_USER_PROJECT_ROLES, context.project_roles)
       commit(LOAD_OPEN_PRODUCTIONS_END, context.projects)
       if (rootGetters.currentProduction) {
         commit(SET_CURRENT_PRODUCTION, rootGetters.currentProduction.id)
@@ -409,6 +453,21 @@ const mutations = {
   [USER_LOGOUT](state) {
     state.user = null
     state.isAuthenticated = false
+    state.projectRoles = {}
+  },
+
+  [SET_USER_PROJECT_ROLES](state, projectRoles) {
+    state.projectRoles = projectRoles || {}
+  },
+
+  [SET_USER_PROJECT_ROLE](state, { projectId, role }) {
+    const projectRoles = { ...state.projectRoles }
+    if (role === null) {
+      delete projectRoles[projectId]
+    } else {
+      projectRoles[projectId] = role
+    }
+    state.projectRoles = projectRoles
   },
   [USER_LOGIN_FAIL](state) {
     state.user = null
@@ -619,7 +678,6 @@ const mutations = {
         last_comment: comment
       })
       cache.todosIndex = buildTaskIndex(state.todos)
-      cache.doneIndex = buildTaskIndex(cache.doneTasks)
     }
   },
 

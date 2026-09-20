@@ -42,11 +42,11 @@ export default defineConfig([
       reportUnusedDisableDirectives: 'off'
     },
     languageOptions: {
-      ecmaVersion: 2020,
+      ecmaVersion: 2021,
       sourceType: 'module',
       globals: {
         ...globals.browser,
-        ...globals.es2020
+        ...globals.es2021
       }
     },
     rules: {
@@ -89,7 +89,8 @@ export default defineConfig([
       'vue/order-in-components': 'off',
       'vue/require-default-prop': 'off',
       'vue/require-prop-types': 'off',
-      'vue/no-template-shadow': 'off'
+      'vue/no-template-shadow': 'off',
+      'vue/no-undef-properties': 'off' // Off until the Options API migration ends
     }
   },
 

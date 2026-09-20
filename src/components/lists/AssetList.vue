@@ -259,6 +259,7 @@
                   estimation: !isAssetEstimation
                 }"
                 namespace="assets"
+                :production-id="currentProduction?.id"
                 v-model="metadataDisplayHeaders"
                 v-model:is-open="columnSelectorDisplayed"
                 v-if="displaySettings.showInfos"
@@ -397,6 +398,7 @@
                   :column="taskTypeMap.get(columnId)"
                   :entity="asset"
                   :task-test="taskMap.get(asset.validations.get(columnId))"
+                  :task-href="taskHref(asset.validations.get(columnId))"
                   :selected="isSelected(i, k, j)"
                   :row-x="getIndex(i, k)"
                   :column-y="j"
@@ -545,6 +547,7 @@
                   :contact-sheet="displaySettings.contactSheetMode"
                   :entity="asset"
                   :task-test="taskMap.get(asset.validations.get(columnId))"
+                  :task-href="taskHref(asset.validations.get(columnId))"
                   :selected="
                     isSelected(
                       i,
@@ -579,29 +582,14 @@
         </template>
       </table>
 
-      <div
-        class="has-text-centered"
-        v-if="isEmptyList && !isCurrentUserClient && !isLoading"
-      >
-        <p class="info">
-          <img src="../../assets/illustrations/empty_asset.png" alt="" />
-        </p>
-        <p class="info">{{ $t('assets.empty_list') }}</p>
-        <button-simple
-          class="level-item big-button"
-          :text="$t('assets.new_assets')"
-          @click="$emit('new-clicked')"
-        />
-      </div>
-      <div
-        class="has-text-centered"
-        v-if="isEmptyList && isCurrentUserClient && !isLoading"
-      >
-        <p class="info">
-          <img src="../../assets/illustrations/empty_asset.png" alt="" />
-        </p>
-        <p class="info">{{ $t('assets.empty_list_client') }}</p>
-      </div>
+      <empty-list
+        :text="$t('assets.empty_list')"
+        :read-only-text="$t('assets.empty_list_read_only')"
+        :button-text="$t('assets.new_assets')"
+        :illustration="emptyAssetIllustration"
+        @create="$emit('new-clicked')"
+        v-if="isEmptyList && !isLoading"
+      />
 
       <table-info :is-loading="isLoading" :is-error="isError" big-cells />
     </div>
@@ -622,7 +610,9 @@ import { entityListMixin } from '@/components/mixins/entity_list'
 import { formatListMixin } from '@/components/mixins/format'
 import { selectionListMixin } from '@/components/mixins/selection'
 
+import emptyAssetIllustration from '@/assets/illustrations/empty_asset.png'
 import preferences from '@/lib/preferences'
+import { getTaskHref } from '@/lib/path'
 import { sortTaskTypes } from '@/lib/sorting'
 import { range } from '@/lib/time'
 
@@ -635,6 +625,7 @@ import ValidationHeader from '@/components/cells/ValidationHeader.vue'
 import AssetListNumbers from '@/components/widgets/AssetListNumbers.vue'
 import ButtonSimple from '@/components/widgets/ButtonSimple.vue'
 import ComboboxTaskType from '@/components/widgets/ComboboxTaskType.vue'
+import EmptyList from '@/components/widgets/EmptyList.vue'
 import EntityThumbnail from '@/components/widgets/EntityThumbnail.vue'
 import SortableFieldHeader from '@/components/widgets/SortableFieldHeader.vue'
 import TableHeaderMenu from '@/components/widgets/TableHeaderMenu.vue'
@@ -663,6 +654,7 @@ export default {
     ButtonSimple,
     ComboboxTaskType,
     DescriptionCell,
+    EmptyList,
     EntityThumbnail,
     MetadataInput,
     MetadataHeader,
@@ -723,6 +715,7 @@ export default {
     return {
       type: 'asset',
       columnSelectorDisplayed: false,
+      emptyAssetIllustration,
       hiddenColumns: {},
       lastSelection: null,
       lastFieldHeaderMenuDisplayed: null,
@@ -786,8 +779,6 @@ export default {
       'isAssetDescription',
       'isAssetResolution',
       'isCurrentUserClient',
-      'isCurrentUserManager',
-      'isCurrentUserSupervisor',
       'isShowAssignations',
       'isAssetEstimation',
       'isAssetTime',
@@ -799,6 +790,13 @@ export default {
       'taskMap',
       'user'
     ]),
+
+    // Production-scoped: effective role on the current production (global
+    // admins/managers still pass, but a per-project override wins).
+    ...mapGetters({
+      isCurrentUserManager: 'isCurrentUserProductionManager',
+      isCurrentUserSupervisor: 'isCurrentUserProductionSupervisor'
+    }),
 
     assetCache() {
       return assetStore.cache
@@ -948,8 +946,8 @@ export default {
       const mainEpisode = this.episodeMap.get(asset.episode_id)
       const mainEpisodeName = mainEpisode ? mainEpisode.name : 'MP'
       const episodeNames = (asset.casting_episode_ids || [])
-        .map(eId => this.episodeMap.get(eId).name)
-        .filter(name => name !== mainEpisodeName)
+        .map(eId => this.episodeMap.get(eId)?.name)
+        .filter(name => name && name !== mainEpisodeName)
       let episodeNameString = ''
       if (episodeNames.length > 2) {
         if (full) {
@@ -1046,6 +1044,17 @@ export default {
 
     getIndex(i, k) {
       return this.getEntityLineNumber(this.displayedAssets, i, k)
+    },
+
+    taskHref(taskId) {
+      return getTaskHref(
+        this.$router,
+        this.taskMap.get(taskId),
+        this.currentProduction,
+        this.isTVShow,
+        this.currentEpisode,
+        this.taskTypeMap
+      )
     },
 
     assetPath(assetId) {
@@ -1223,7 +1232,6 @@ td.ready-for {
 
 .description {
   min-width: 200px;
-  max-width: 200px;
   width: 200px;
 }
 
@@ -1288,10 +1296,6 @@ td.ready-for {
 
 .asset-name {
   color: inherit;
-}
-
-.info img {
-  max-width: 80vh;
 }
 
 input[type='number']::-webkit-outer-spin-button,

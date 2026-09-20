@@ -18,14 +18,14 @@
               @click="() => (modals.isBuildFilterDisplayed = true)"
             />
             <div class="filler"></div>
-            <div class="flexrow flexrow-item" v-if="!isCurrentUserClient">
+            <div class="flexrow flexrow-item">
               <combobox-department
                 class="combobox-department flexrow-item"
                 :selectable-departments="selectableDepartments('Sequence')"
                 :display-all-and-my-departments="true"
                 rounded
                 v-model="selectedDepartment"
-                v-if="departments.length > 0"
+                v-if="departments.length > 0 && !isCurrentUserClient"
               />
               <combobox-display-options
                 class="flexrow-item"
@@ -36,7 +36,7 @@
             <div class="flexrow" v-if="isCurrentUserManager">
               <button-simple
                 class="flexrow-item"
-                :text="$t('sequences.new_sequence')"
+                :text="$t('sequences.new_sequences')"
                 icon="plus"
                 @click="showNewModal"
               />
@@ -47,6 +47,7 @@
             <search-query-list
               :queries="sequenceSearchQueries"
               type="sequence"
+              :production-id="currentProduction?.id"
               @remove-search="removeSearchQuery"
               v-if="!isSequencesLoading && !initialLoading"
             />
@@ -68,6 +69,7 @@
           :validation-columns="sequenceValidationColumns"
           :department-filter="departmentFilter"
           @add-metadata="onAddMetadataClicked"
+          @add-sequences="showNewModal"
           @change-sort="onChangeSortClicked"
           @create-tasks="showCreateTasksModal"
           @delete-all-tasks="onDeleteAllTasksClicked"
@@ -346,7 +348,8 @@ export default {
     if (
       this.sequenceMap.size < 1 ||
       this.sequenceValidationColumns.length === 0 ||
-      this.sequenceMap.values().next().project_id !== this.currentProduction.id
+      this.sequenceMap.values().next().value?.project_id !==
+        this.currentProduction.id
     ) {
       this.loadSequencesWithTasks()
         .then(() => {
@@ -357,6 +360,7 @@ export default {
     } else {
       if (!this.isSequencesLoading) this.initialLoading = false
       finalize()
+      this.reloadEpisodeSequencesIfNeeded()
     }
   },
 
@@ -371,8 +375,8 @@ export default {
       'sequenceMap',
       'sequences',
       'sequenceSearchQueries',
+      'sequencesLoadingKey',
       'isCurrentUserClient',
-      'isCurrentUserManager',
       'isSequenceDescription',
       'isSequenceEstimation',
       'isSequenceTime',
@@ -391,6 +395,9 @@ export default {
       'taskTypeMap',
       'user'
     ]),
+    ...mapGetters({
+      isCurrentUserManager: 'isCurrentUserProductionManager'
+    }),
 
     renderColumns() {
       const collection = [...this.dataMatchers, ...this.optionalColumns]
@@ -469,6 +476,22 @@ export default {
       })
     },
 
+    // The topbar sets the current episode before this page instance exists, so
+    // the currentEpisode watcher below cannot fire on a fresh mount: without
+    // this check the cache of the episode left behind is displayed as is.
+    reloadEpisodeSequencesIfNeeded() {
+      const scope = this.isTVShow ? (this.currentEpisode?.id ?? '') : ''
+      if (
+        !this.currentProduction ||
+        this.sequencesLoadingKey === `${this.currentProduction.id}/${scope}`
+      ) {
+        return
+      }
+      this.$refs['sequence-search-field']?.setValue('')
+      this.$store.commit('SET_SEQUENCE_LIST_SCROLL_POSITION', 0)
+      this.reset()
+    },
+
     resetEditModal() {
       const form = { name: '' }
       if (this.openProductions.length > 0) {
@@ -505,7 +528,7 @@ export default {
           headers.push(this.$t('main.estimation_short'))
         }
         this.sequenceValidationColumns.forEach(taskTypeId => {
-          headers.push(this.taskTypeMap.get(taskTypeId).name)
+          headers.push(this.taskTypeMap.get(taskTypeId)?.name || '')
           headers.push('Assignations')
         })
         csv.buildCsvFile(name, [headers].concat(sequenceLines))
@@ -600,15 +623,7 @@ export default {
     },
 
     currentSection() {
-      if (
-        (this.isTVShow && this.displayedSequences.length === 0) ||
-        this.displayedSequences[0]?.episode_id !== this.currentEpisode?.id
-      ) {
-        this.$refs['sequence-search-field'].setValue('')
-        this.$store.commit('SET_SEQUENCE_LIST_SCROLL_POSITION', 0)
-        this.initialLoading = false
-        this.reset()
-      }
+      this.reloadEpisodeSequencesIfNeeded()
     },
 
     isSequencesLoading() {
@@ -633,7 +648,7 @@ export default {
       }
     }
     return {
-      title: `${this.currentProduction.name} | ${this.$t('sequences.title')} - Kitsu`
+      title: `${this.currentProduction?.name || ''} | ${this.$t('sequences.title')} - Kitsu`
     }
   }
 }
@@ -646,10 +661,6 @@ export default {
 
 .page-header {
   margin-bottom: 1em;
-}
-
-.flexcolumn {
-  align-items: flex-start;
 }
 
 .sequences {

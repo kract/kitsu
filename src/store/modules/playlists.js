@@ -1,4 +1,4 @@
-import { DEFAULT_NB_FRAMES_PICTURE } from '@/lib/playlist'
+import { DEFAULT_NB_FRAMES_PICTURE, isPlaylistInScope } from '@/lib/playlist'
 import playlistsApi from '@/store/api/playlists'
 import { sortByDate } from '@/lib/sorting'
 import { removeModelFromList, updateModelFromList } from '@/lib/models'
@@ -22,8 +22,8 @@ import {
   REMOVE_ENTITY_FROM_PLAYLIST,
   LOAD_ENTITY_PREVIEW_FILES_END,
   LOAD_PRODUCTIONS_END,
-  LOAD_TASK_STATUSES_END,
-  LOAD_TASK_TYPES_END,
+  EDIT_TASK_STATUS_END,
+  EDIT_TASK_TYPE_END,
   ADD_NEW_JOB,
   MARK_JOB_AS_DONE,
   REMOVE_BUILD_JOB,
@@ -84,10 +84,14 @@ const getters = {
   previewFileMap: state => state.previewFileMap
 }
 
+// Playlist loads land in click order only by chance: the load started last
+// owns the preview maps.
+let playlistRequest = 0
+
 const actions = {
   loadPlaylists(
     { commit, rootGetters },
-    { sortBy = 'updated_at', page = 1, taskTypeId }
+    { sortBy = 'updated_at', page = 1, taskTypeId, forEntity }
   ) {
     const production = rootGetters.currentProduction
     let episode = rootGetters.currentEpisode
@@ -98,7 +102,7 @@ const actions = {
 
     commit(LOAD_PLAYLISTS_END, [])
     return playlistsApi
-      .getPlaylists(production, episode, taskTypeId, sortBy, page)
+      .getPlaylists(production, episode, taskTypeId, sortBy, page, forEntity)
       .then(playlists => {
         commit(LOAD_PLAYLISTS_END, playlists)
         return playlists
@@ -107,7 +111,7 @@ const actions = {
 
   loadMorePlaylists(
     { commit, rootGetters },
-    { sortBy = 'updated_at', page = 1, taskTypeId }
+    { sortBy = 'updated_at', page = 1, taskTypeId, forEntity }
   ) {
     const production = rootGetters.currentProduction
     let episode = rootGetters.currentEpisode
@@ -117,7 +121,7 @@ const actions = {
     if (isTVShow && !episode) return Promise.resolve([])
     if (!isTVShow) episode = null
     return playlistsApi
-      .getPlaylists(production, episode, taskTypeId, sortBy, page)
+      .getPlaylists(production, episode, taskTypeId, sortBy, page, forEntity)
       .then(playlists => {
         commit(ADD_PLAYLISTS, playlists)
         return playlists
@@ -126,11 +130,12 @@ const actions = {
 
   loadPlaylist({ commit, rootGetters }, playlist) {
     const currentProduction = rootGetters.currentProduction
+    const request = ++playlistRequest
     commit(LOAD_PLAYLIST_START)
     return playlistsApi
       .getPlaylist(currentProduction, playlist)
       .then(playlist => {
-        commit(LOAD_PLAYLIST_END, playlist)
+        if (request === playlistRequest) commit(LOAD_PLAYLIST_END, playlist)
         return playlist
       })
       .catch(err => {
@@ -139,10 +144,16 @@ const actions = {
       })
   },
 
-  async refreshPlaylist({ commit, rootGetters }, id) {
+  // A live event refetches a playlist. A new one joins the list only when it
+  // matches the scope the list was loaded for, an updated one is refreshed
+  // only while listed: the list may have been replaced during the fetch.
+  async refreshPlaylist({ commit, state, rootGetters }, { id, scope = null }) {
     const currentProduction = rootGetters.currentProduction
     const playlist = await playlistsApi.getPlaylist(currentProduction, { id })
-    commit(EDIT_PLAYLIST_END, playlist)
+    const isListed = scope
+      ? isPlaylistInScope(playlist, scope)
+      : Boolean(state.playlistMap.get(playlist.id))
+    if (isListed) commit(EDIT_PLAYLIST_END, playlist)
     return playlist
   },
 
@@ -293,6 +304,15 @@ const actions = {
     return playlistsApi.loadTempPlaylist(production, taskIds, sort)
   },
 
+  loadTempPlaylistFromEntities({ rootGetters }, { entityIds, sort }) {
+    const production = rootGetters.currentProduction
+    return playlistsApi.loadTempPlaylistFromEntities(
+      production,
+      entityIds,
+      sort
+    )
+  },
+
   getRunningPreviewFiles(_, { limit, lastPreviewFileId = null }) {
     return playlistsApi.getRunningPreviewFiles(limit, lastPreviewFileId)
   },
@@ -324,14 +344,29 @@ const actions = {
     return playlistsApi.loadSharedPlaylist(shareToken)
   },
 
-  async loadSharedPlaylistContext({ commit }, shareToken) {
+  async loadSharedPlaylistContext({ commit, rootGetters }, shareToken) {
     const data = await playlistsApi.loadSharedPlaylistContext(shareToken)
     if (data.project) {
       commit(LOAD_PRODUCTIONS_END, [data.project])
       commit(SET_CURRENT_PRODUCTION, data.project.id)
     }
-    commit(LOAD_TASK_TYPES_END, data.task_types || [])
-    commit(LOAD_TASK_STATUSES_END, data.task_statuses || [])
+    // Only add what is missing: a share link opened in a logged in tab would
+    // otherwise trim both sets down to this production, and overwrite the
+    // allowance flags the task status load normalises.
+    const taskTypeMap = rootGetters.taskTypeMap
+    const taskTypes = data.task_types || []
+    taskTypes.forEach(taskType => {
+      if (!taskTypeMap.has(taskType.id)) {
+        commit(EDIT_TASK_TYPE_END, taskType)
+      }
+    })
+    const taskStatusMap = rootGetters.taskStatusMap
+    const taskStatuses = data.task_statuses || []
+    taskStatuses.forEach(taskStatus => {
+      if (!taskStatusMap.has(taskStatus.id)) {
+        commit(EDIT_TASK_STATUS_END, taskStatus)
+      }
+    })
     return data
   },
 
@@ -369,7 +404,8 @@ const mutations = {
   [LOAD_PLAYLIST_START](state) {},
 
   [LOAD_PLAYLIST_END](state, playlist) {
-    state.playlistMap.get(playlist.id).build_jobs = playlist.build_jobs
+    const cachedPlaylist = state.playlistMap.get(playlist.id)
+    if (cachedPlaylist) cachedPlaylist.build_jobs = playlist.build_jobs
     state.previewFileMap.clear()
     state.previewFileEntityMap.clear()
     state.playlistEntryMap.clear()

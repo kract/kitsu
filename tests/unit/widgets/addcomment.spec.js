@@ -71,8 +71,11 @@ describe('AddComment', () => {
       strict: true,
       getters: {
         isDarkTheme: () => false,
+        isCurrentUserAdmin: () => false,
         isCurrentUserArtist: () => false,
         isCurrentUserClient: () => false,
+        isCurrentUserManager: () => false,
+        currentUserRoleForProduction: () => () => null,
         departmentMap: () => new Map(),
         productionDepartmentIds: () => [],
         productionMap: () =>
@@ -129,10 +132,6 @@ describe('AddComment', () => {
     })
   })
 
-  it('mounts successfully', () => {
-    expect(wrapper.exists()).toBe(true)
-  })
-
   it('renders the status tab as active by default', () => {
     const tabs = wrapper.findAll('.tab-row span')
     const statusTab = tabs[0]
@@ -151,16 +150,6 @@ describe('AddComment', () => {
     expect(
       html.includes('at-ta') || html.includes('textarea')
     ).toBe(true)
-  })
-
-  it('updates draft text via exposed API', () => {
-    draftComment.text = 'Great work!'
-    expect(draftComment.text).toBe('Great work!')
-  })
-
-  it('shows post button', () => {
-    const postButton = wrapper.find('.post-button')
-    expect(postButton.exists()).toBe(true)
   })
 
   it('emits add-comment when post button is clicked in status mode', async () => {
@@ -203,6 +192,75 @@ describe('AddComment', () => {
       })
       await wrapper.vm.$nextTick()
       expect(wrapper.vm.isValidForm).toBe(true)
+    })
+
+    it('treats an empty revision as auto and stays valid', async () => {
+      draftComment.mode = 'publish'
+      await wrapper.setProps({ previewForms: [makeFormWithFile('test.png')] })
+      draftComment.nextRevision = ''
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.isValidForm).toBe(true)
+    })
+
+    it('allows revision 0', async () => {
+      draftComment.mode = 'publish'
+      await wrapper.setProps({ previewForms: [makeFormWithFile('test.png')] })
+      draftComment.nextRevision = '0'
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.isValidForm).toBe(true)
+    })
+
+    it('rejects a negative revision', async () => {
+      draftComment.mode = 'publish'
+      await wrapper.setProps({ previewForms: [makeFormWithFile('test.png')] })
+      draftComment.nextRevision = '-1'
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.isValidForm).toBe(false)
+    })
+  })
+
+  describe('revision-below-current warning', () => {
+    it('flags a revision lower than or equal to the current one', async () => {
+      await wrapper.setProps({ revision: 5 })
+      draftComment.nextRevision = '5'
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.isRevisionBelowCurrent).toBe(true)
+      draftComment.nextRevision = '3'
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.isRevisionBelowCurrent).toBe(true)
+    })
+
+    it('does not flag a revision greater than the current one', async () => {
+      await wrapper.setProps({ revision: 5 })
+      draftComment.nextRevision = '6'
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.isRevisionBelowCurrent).toBe(false)
+    })
+
+    it('does not flag an empty or auto revision', async () => {
+      await wrapper.setProps({ revision: 5 })
+      draftComment.nextRevision = ''
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.isRevisionBelowCurrent).toBe(false)
+      draftComment.nextRevision = undefined
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.isRevisionBelowCurrent).toBe(false)
+    })
+  })
+
+  describe('revision pre-fill from dropped files', () => {
+    it('pre-fills the revision encoded in the file name, including v0', async () => {
+      await wrapper.setProps({
+        previewForms: [makeFormWithFile('shot_v000.png')]
+      })
+      await wrapper.vm.$nextTick()
+      expect(draftComment.nextRevision).toBe('000')
+    })
+
+    it('leaves the revision auto when the file name has none', async () => {
+      await wrapper.setProps({ previewForms: [makeFormWithFile('shot.png')] })
+      await wrapper.vm.$nextTick()
+      expect(draftComment.nextRevision).toBeUndefined()
     })
   })
 

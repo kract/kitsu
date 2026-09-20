@@ -22,17 +22,22 @@ const route = useRoute()
 
 // Computed
 
-const activeTab = computed(() => route.query.tab || 'events')
-
 const tabs = computed(() => [
   { name: 'events', label: t('logs.audit.title') },
   { name: 'logins', label: t('logs.logins.title') },
   { name: 'preview_files', label: t('logs.preview_files.title') }
 ])
+
+// Fall back to the audit tab when the URL carries an unknown ?tab= value.
+const activeTab = computed(() => {
+  const tab = route.query.tab || 'events'
+  return tabs.value.some(({ name }) => name === tab) ? tab : 'events'
+})
 </script>
 
 <style lang="scss" scoped>
 .fixed-page {
+  color: var(--text);
   margin-top: 60px;
   overflow: scroll;
   padding: 2em;

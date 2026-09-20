@@ -7,6 +7,9 @@
             <th scope="col" class="name datatable-row-header">
               {{ $t('people.list.name') }}
             </th>
+            <!-- Email and contract stay on the global role: zou only serves
+                 these person fields to global managers, a per-project manager
+                 would get empty cells. -->
             <th scope="col" class="email" v-if="isCurrentUserManager">
               {{ $t('people.list.email') }}
             </th>
@@ -19,7 +22,11 @@
             <th scope="col">
               {{ $t('people.list.departments') }}
             </th>
-            <th scope="col" class="actions" v-if="isCurrentUserManager"></th>
+            <th
+              scope="col"
+              class="actions"
+              v-if="isCurrentUserProductionManager"
+            ></th>
           </tr>
         </thead>
         <tbody class="datatable-body" v-if="!isEmpty">
@@ -35,10 +42,40 @@
               {{ $t(`people.contract.${person.contract_type}`) }}
             </td>
             <td class="role">
-              {{ $t(`people.role.${person.role}`) }}
+              <div class="flexrow">
+                <!-- Admin is a global-only role: no project role select.
+                     Own row excluded too: a manager demoting themselves
+                     would lock themselves out with no way back. -->
+                <combobox
+                  v-if="
+                    isCurrentUserProductionManager &&
+                    person.role !== 'admin' &&
+                    person.id !== user.id
+                  "
+                  thin
+                  class="flexrow-item"
+                  :options="roleOptions"
+                  :with-margin="false"
+                  :model-value="displayedRole(person)"
+                  @update:model-value="value => onRoleChange(person, value)"
+                />
+                <span v-else class="flexrow-item">
+                  {{ $t(`people.role.${displayedRole(person)}`) }}
+                </span>
+                <span
+                  v-if="isOverridden(person)"
+                  class="tag project-role-tag flexrow-item"
+                  :title="overriddenTitle(person)"
+                >
+                  {{ $t('people.project_role') }}
+                </span>
+              </div>
             </td>
             <department-names-cell :departments="person.departments" />
-            <td class="actions has-text-right" v-if="isCurrentUserManager">
+            <td
+              class="actions has-text-right"
+              v-if="isCurrentUserProductionManager"
+            >
               <button class="button" @click="removePerson(person)">
                 {{ $t('main.remove') }}
               </button>
@@ -53,47 +90,77 @@
     </p>
 
     <p class="has-text-centered footer-info" v-else>
-      {{ entries.length }} {{ $t('people.persons', entries.length) }}
+      {{ entries.length }} {{ $t('people.persons', { count: entries.length }) }}
     </p>
   </div>
 </template>
 
-<script>
-import { mapGetters, mapActions } from 'vuex'
+<script setup>
+// Imports
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useStore } from 'vuex'
 
+/* eslint-disable no-unused-vars */
 import DepartmentNamesCell from '@/components/cells/DepartmentNamesCell.vue'
 import PeopleNameCell from '@/components/cells/PeopleNameCell.vue'
+import Combobox from '@/components/widgets/Combobox.vue'
+/* eslint-enable no-unused-vars */
 
-export default {
-  name: 'production-team-list',
+// Composables
+const { t } = useI18n()
+const store = useStore()
 
-  components: {
-    DepartmentNamesCell,
-    PeopleNameCell
-  },
+// Props / Emits
+const props = defineProps({
+  entries: { type: Array, default: () => [] },
+  projectRoles: { type: Object, default: () => ({}) }
+})
+const emit = defineEmits(['update-role'])
 
-  props: {
-    entries: {
-      type: Array,
-      default: () => []
-    }
-  },
+// Computed
+const isCurrentUserManager = computed(() => store.getters.isCurrentUserManager)
+const isCurrentUserProductionManager = computed(
+  () => store.getters.isCurrentUserProductionManager
+)
+const user = computed(() => store.getters.user)
+const isEmpty = computed(() => !props.entries?.length)
 
-  computed: {
-    ...mapGetters(['isCurrentUserManager']),
+// No 'client' here: making someone a client on a single project makes no
+// sense, clients are invited as such globally.
+const PROJECT_ROLES = ['user', 'supervisor', 'manager', 'vendor']
 
-    isEmpty() {
-      return !this.entries?.length
-    }
-  },
+const roleOptions = computed(() =>
+  PROJECT_ROLES.map(role => ({
+    label: t(`people.role.${role}`),
+    value: role
+  }))
+)
 
-  methods: {
-    ...mapActions(['removePersonFromTeam']),
+// Functions
+// Admins ignore project overrides (zou refuses to set one on them, but a
+// stale link role can linger from before a promotion to admin).
+const isOverridden = person =>
+  person.role !== 'admin' && Boolean(props.projectRoles[person.id])
 
-    removePerson(person) {
-      this.removePersonFromTeam(person)
-    }
-  }
+const displayedRole = person =>
+  isOverridden(person) ? props.projectRoles[person.id] : person.role
+
+const overriddenTitle = person =>
+  isOverridden(person)
+    ? t('people.global_role', { role: t(`people.role.${person.role}`) })
+    : undefined
+
+const onRoleChange = (person, value) => {
+  // Picking the person's global role back means inheriting it again.
+  emit('update-role', {
+    person,
+    role: value === person.role ? null : value
+  })
+}
+
+const removePerson = person => {
+  store.dispatch('removePersonFromTeam', person)
 }
 </script>
 
@@ -119,8 +186,8 @@ export default {
 }
 
 .role {
-  width: 160px;
-  min-width: 160px;
+  width: 200px;
+  min-width: 200px;
 }
 
 .contract {
@@ -134,6 +201,14 @@ export default {
 
 .data-list {
   margin-top: 2em;
+}
+
+.project-role-tag {
+  background: $blue;
+  color: white;
+  font-size: 0.7em;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .footer-info {

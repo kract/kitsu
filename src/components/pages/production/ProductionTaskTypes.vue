@@ -196,29 +196,30 @@ const isShotsOnly = computed(
   () => currentProduction.value.production_type === 'shots'
 )
 
-const taskTypeGroups = computed(() => {
-  let groups = []
-  if (!isShotsOnly.value) {
-    groups.push(assetTaskTypes.value)
-  }
-  if (!isAssetsOnly.value) {
-    groups = groups.concat([
-      shotTaskTypes.value,
-      editTaskTypes.value,
-      sequenceTaskTypes.value,
-      episodeTaskTypes.value
-    ])
-  }
-  return groups
-})
+const isTVShow = computed(() => store.getters.isTVShow)
 
-const taskTypeTabs = computed(() => [
-  { label: t('assets.title'), name: 'assets' },
-  { label: t('shots.title'), name: 'shots' },
-  { label: t('sequences.title'), name: 'sequences' },
-  { label: t('episodes.title'), name: 'episodes' },
-  { label: t('edits.title'), name: 'edits' }
-])
+const visibleEntities = computed(() =>
+  [
+    !isShotsOnly.value && 'assets',
+    !isAssetsOnly.value && 'shots',
+    !isAssetsOnly.value && 'sequences',
+    isTVShow.value && 'episodes',
+    !isAssetsOnly.value && 'edits'
+  ].filter(Boolean)
+)
+
+const taskTypeGroups = computed(() =>
+  Object.values(groupByType)
+    .map(({ ref: stateRef }) => stateRef.value)
+    .filter(group => visibleEntities.value.includes(group.entity))
+)
+
+const taskTypeTabs = computed(() =>
+  visibleEntities.value.map(entity => ({
+    label: t(`${entity}.title`),
+    name: entity
+  }))
+)
 
 const isEmpty = list => !list || list.length === 0
 
@@ -251,9 +252,12 @@ const updateTaskTypeIdFromRemaining = () => {
 
 const addTaskType = async taskType => {
   const id = taskType && taskType.id ? taskType.id : taskTypeId.value
+  const taskTypeToAdd = taskTypeMap.value.get(id)
+  if (!taskTypeToAdd) return
+  const entityType = taskTypeToAdd.for_entity
   await store.dispatch('addTaskTypeToProduction', {
     taskTypeId: id,
-    priority: assetTaskTypes.value.length
+    priority: groupByType[entityType].ref.value.list.length + 1
   })
   try {
     await store.dispatch('createScheduleItem', {
@@ -370,11 +374,9 @@ const importTaskTypesFromProduction = async productionId => {
 onMounted(() => {
   updateTaskTypeIdFromRemaining()
 
-  if (route.query.section) {
-    activeTab.value = route.query.section
-  } else {
-    activeTab.value = isShotsOnly.value ? 'shots' : 'assets'
-  }
+  activeTab.value = visibleEntities.value.includes(route.query.section)
+    ? route.query.section
+    : visibleEntities.value[0]
 
   resetDisplayedTaskTypes()
   if (currentProduction.value) {
@@ -398,7 +400,7 @@ watch(
 watch(
   () => route.query.section,
   section => {
-    if (!section) return
+    if (!visibleEntities.value.includes(section)) return
     activeTab.value = section
     nextTick(() => {
       updateTaskTypeIdFromRemaining()

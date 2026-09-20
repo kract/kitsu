@@ -83,14 +83,14 @@
                 :key="columnId"
                 :hidden-columns="hiddenColumns"
                 :column-id="columnId"
-                :title="taskTypeMap.get(columnId).name"
+                :title="taskTypeMap.get(columnId)?.name"
                 :validation-style="getValidationStyle(columnId)"
                 :left="
                   offsets['validation-' + columnIndexInGrid]
                     ? `${offsets['validation-' + columnIndexInGrid]}px`
                     : '0'
                 "
-                type="assets"
+                type="shots"
                 @show-header-menu="
                   event => showHeaderMenu(columnId, columnIndexInGrid, event)
                 "
@@ -280,6 +280,7 @@
                   resolution: !isResolution,
                   max_retakes: !isMaxRetakes
                 }"
+                :production-id="currentProduction?.id"
                 v-model="metadataDisplayHeaders"
                 v-model:is-open="columnSelectorDisplayed"
                 v-if="displaySettings.showInfos"
@@ -314,7 +315,7 @@
                     $emit('sequence-clicked', group[0].sequence_name)
                   "
                 >
-                  {{ group[0] ? group[0].sequence_name : '' }}
+                  {{ groupHeader(group) }}
                 </div>
               </th>
             </tr>
@@ -414,6 +415,7 @@
                   :row-x="getIndex(i, k)"
                   :selected="isSelected(i, k, j)"
                   :sticked="true"
+                  :task-href="taskHref(shot.validations.get(columnId))"
                   :task-test="taskMap.get(shot.validations.get(columnId))"
                   @select="infos => onTaskSelected(infos, true)"
                   @unselect="infos => onTaskUnselected(infos, true)"
@@ -733,6 +735,7 @@
                   :column="taskTypeMap.get(columnId)"
                   :contact-sheet="displaySettings.contactSheetMode"
                   :entity="shot"
+                  :task-href="taskHref(shot.validations?.get(columnId))"
                   :task-test="
                     taskMap.get(
                       shot.validations ? shot.validations.get(columnId) : null
@@ -773,66 +776,47 @@
     </div>
     <table-info :is-loading="isLoading" :is-error="isError" big-cells />
 
-    <div
-      class="has-text-centered"
-      v-if="isEmptyList && !isCurrentUserClient && !isLoading"
-    >
-      <p class="info">
-        <img src="../../assets/illustrations/empty_shot.png" alt="" />
-      </p>
-      <p class="info">{{ $t('shots.empty_list') }}</p>
-      <button-simple
-        class="level-item big-button"
-        :text="$t('shots.new_shots')"
-        @click="$emit('add-shots')"
-      />
-    </div>
-    <div
-      class="has-text-centered"
-      v-if="isEmptyList && isCurrentUserClient && !isLoading"
-    >
-      <p class="info">
-        <img src="../../assets/illustrations/empty_shot.png" alt="" />
-      </p>
-      <p class="info">{{ $t('shots.empty_list_client') }}</p>
-    </div>
+    <empty-list
+      :text="$t('shots.empty_list')"
+      :read-only-text="$t('shots.empty_list_read_only')"
+      :button-text="isAllEpisodes ? '' : $t('shots.new_shots')"
+      @create="$emit('add-shots')"
+      v-if="isEmptyList && !isLoading"
+    />
 
     <p class="has-text-centered nb-shots" v-if="!isEmptyList && !isLoading">
-      {{ displayedShotsLength }} {{ $t('shots.number', displayedShotsLength) }}
+      {{ displayedShotsLength }}
+      {{ $t('shots.number', { count: displayedShotsLength }) }}
       <span v-if="displayedShotsFrames">
         -
         {{ displayedShotsFrames }}
-        {{ $t('main.nb_frames', displayedShotsFrames) }}
+        {{ $t('main.nb_frames', { count: displayedShotsFrames }) }}
       </span>
       <span v-if="isPaperProduction">
         -
         {{ displayedShotsDrawings }}
-        {{ $t('main.nb_drawings', displayedShotsDrawings) }}
+        {{ $t('main.nb_drawings', { count: displayedShotsDrawings }) }}
       </span>
       <span v-if="displayedShotsTimeSpent > 0 || displayedShotsEstimation > 0">
         ({{ formatDuration(displayedShotsTimeSpent) }}
         {{
           isDurationInHours
-            ? $t(
-                'main.hours_spent',
-                formatDuration(displayedShotsTimeSpent, false)
-              )
-            : $t(
-                'main.days_spent',
-                formatDuration(displayedShotsTimeSpent, false)
-              )
+            ? $t('main.hours_spent', {
+                count: formatDuration(displayedShotsTimeSpent, false)
+              })
+            : $t('main.days_spent', {
+                count: formatDuration(displayedShotsTimeSpent, false)
+              })
         }},
         {{ formatDuration(displayedShotsEstimation) }}
         {{
           isDurationInHours
-            ? $t(
-                'main.hours_estimated',
-                formatDuration(displayedShotsEstimation, false)
-              )
-            : $t(
-                'main.man_days',
-                formatDuration(displayedShotsEstimation, false)
-              )
+            ? $t('main.hours_estimated', {
+                count: formatDuration(displayedShotsEstimation, false)
+              })
+            : $t('main.man_days', {
+                count: formatDuration(displayedShotsEstimation, false)
+              })
         }})
       </span>
     </p>
@@ -842,6 +826,7 @@
 <script>
 import { mapGetters, mapActions } from 'vuex'
 
+import { getTaskHref } from '@/lib/path'
 import preferences from '@/lib/preferences'
 import { range } from '@/lib/time'
 import { formatToTimecode } from '@/lib/video'
@@ -854,6 +839,7 @@ import { selectionListMixin } from '@/components/mixins/selection'
 
 import ButtonSimple from '@/components/widgets/ButtonSimple.vue'
 import DescriptionCell from '@/components/cells/DescriptionCell.vue'
+import EmptyList from '@/components/widgets/EmptyList.vue'
 import EntityThumbnail from '@/components/widgets/EntityThumbnail.vue'
 import MetadataHeader from '@/components/cells/MetadataHeader.vue'
 import MetadataInput from '@/components/cells/MetadataInput.vue'
@@ -880,6 +866,7 @@ export default {
   components: {
     ButtonSimple,
     DescriptionCell,
+    EmptyList,
     EntityThumbnail,
     MetadataHeader,
     MetadataInput,
@@ -985,9 +972,7 @@ export default {
       'displayedShotsTimeSpent',
       'isBigThumbnails',
       'isCurrentUserAdmin',
-      'isCurrentUserManager',
       'isCurrentUserClient',
-      'isCurrentUserSupervisor',
       'isFps',
       'isFrames',
       'isFrameIn',
@@ -1016,6 +1001,17 @@ export default {
       'taskTypeMap',
       'user'
     ]),
+
+    // Production-scoped: effective role on the current production (global
+    // admins/managers still pass, but a per-project override wins).
+    ...mapGetters({
+      isCurrentUserManager: 'isCurrentUserProductionManager',
+      isCurrentUserSupervisor: 'isCurrentUserProductionSupervisor'
+    }),
+
+    isAllEpisodes() {
+      return this.isTVShow && this.currentEpisode?.id === 'all'
+    },
 
     isEmptyList() {
       return (
@@ -1062,6 +1058,15 @@ export default {
     ...mapActions(['displayMoreShots', 'setShotSelection']),
 
     formatToTimecode,
+
+    groupHeader(group) {
+      const shot = group[0]
+      if (!shot) return ''
+      // Sequence names repeat across episodes: say which one in All mode.
+      return this.isAllEpisodes && shot.episode_name
+        ? `${shot.episode_name} / ${shot.sequence_name}`
+        : shot.sequence_name
+    },
 
     isSelected(indexInGroup, groupIndex, columnIndex) {
       const lineIndex = this.getIndex(indexInGroup, groupIndex)
@@ -1131,6 +1136,17 @@ export default {
 
     loadMoreShots() {
       this.displayMoreShots()
+    },
+
+    taskHref(taskId) {
+      return getTaskHref(
+        this.$router,
+        this.taskMap.get(taskId),
+        this.currentProduction,
+        this.isTVShow,
+        this.currentEpisode,
+        this.taskTypeMap
+      )
     },
 
     shotPath(shotId) {
@@ -1387,14 +1403,6 @@ span.thumbnail-empty {
   width: 50px;
   height: 30px;
   background: #f3f3f3;
-}
-
-.info {
-  margin-top: 2em;
-}
-
-.info img {
-  max-width: 80vh;
 }
 
 .datatable-row th.name {

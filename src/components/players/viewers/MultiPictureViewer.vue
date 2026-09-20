@@ -1,8 +1,9 @@
 <template>
   <div ref="container" class="multi-picture-player">
     <picture-viewer
-      :key="`${preview.id}-${preview.position}`"
+      :key="previewKey(preview)"
       :ref="el => setPictureRef(preview, el)"
+      :background-color="backgroundColor"
       :big="true"
       :default-height="defaultHeight"
       :full-screen="fullScreen"
@@ -10,17 +11,13 @@
       :is-comparing="isComparing"
       :light="light"
       :margin-bottom="marginBottom"
-      :panzoom="panzoom"
       :preview="preview"
-      @loaded="() => $emit('loaded')"
+      @loaded="onViewerLoaded(preview)"
       @panzoom-changed="$event => $emit('panzoom-changed', $event)"
       @panzoom-ready="() => $emit('panzoom-ready')"
       @size-changed="() => $emit('size-changed')"
-      v-for="preview in validPreviews"
-      v-show="
-        preview.id === currentPreview.id &&
-        preview.position === currentPreview.position
-      "
+      v-for="preview in mountedPreviews"
+      v-show="previewKey(preview) === previewKey(currentPreview)"
     />
   </div>
 </template>
@@ -31,6 +28,10 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import PictureViewer from '@/components/players/viewers/PictureViewer.vue'
 
 const props = defineProps({
+  backgroundColor: {
+    type: String,
+    default: '#000000'
+  },
   currentPreview: {
     type: Object,
     default: () => null
@@ -59,17 +60,18 @@ const props = defineProps({
     type: Number,
     default: 0
   },
-  panzoom: {
-    type: Boolean,
-    default: false
-  },
   previews: {
     type: Array,
     default: () => []
   }
 })
 
-defineEmits(['loaded', 'panzoom-changed', 'panzoom-ready', 'size-changed'])
+const emit = defineEmits([
+  'loaded',
+  'panzoom-changed',
+  'panzoom-ready',
+  'size-changed'
+])
 
 const container = ref(null)
 const pictureRefs = reactive({})
@@ -78,8 +80,26 @@ const pictureRefs = reactive({})
 
 const validPreviews = computed(() => props.previews.filter(p => p?.id))
 
+// A viewer is identified by its playlist entry and its rank inside that
+// entry, not by the preview file id: the same entity repeated in a
+// playlist can point at the same preview file twice.
+const previewKey = preview =>
+  preview ? `${preview.entry}-${preview.position}` : null
+
+// Only mount the displayed picture and its immediate neighbours: the
+// strip used to mount (and download) every picture of the playlist up
+// front, saturating the network the moment a playlist opened. The +/-1
+// window keeps prev/next navigation and continuous playback preloaded.
+const mountedPreviews = computed(() => {
+  const list = validPreviews.value
+  const currentKey = previewKey(props.currentPreview)
+  const index = list.findIndex(p => previewKey(p) === currentKey)
+  if (index === -1) return list.slice(0, 2)
+  return list.filter((p, i) => Math.abs(i - index) <= 1)
+})
+
 const setPictureRef = (preview, el) => {
-  const key = `${preview.id}-${preview.position}`
+  const key = previewKey(preview)
   if (el) {
     pictureRefs[key] = el
   } else {
@@ -87,10 +107,19 @@ const setPictureRef = (preview, el) => {
   }
 }
 
+// Every PictureViewer in the strip loads eagerly (v-show): only the
+// displayed one may notify the parent, or each background image finishing
+// its download resets the live annotation canvas (wiping in-progress
+// strokes) for seconds after opening a picture-heavy playlist.
+const onViewerLoaded = preview => {
+  if (previewKey(preview) === previewKey(props.currentPreview)) {
+    emit('loaded')
+  }
+}
+
 const getCurrentViewer = () => {
   if (!props.currentPreview) return null
-  const key = `${props.currentPreview.id}-${props.currentPreview.position}`
-  return pictureRefs[key] || null
+  return pictureRefs[previewKey(props.currentPreview)] || null
 }
 
 const getNaturalDimensions = () => {

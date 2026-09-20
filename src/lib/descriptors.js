@@ -6,6 +6,8 @@
  * `<script setup>` yet. New code should import from here.
  */
 
+import { sortByName } from '@/lib/sorting'
+
 export const getDescriptorChoicesOptions = (descriptor, emptyChoice = true) => {
   const values = (descriptor?.choices || []).map(c => ({ label: c, value: c }))
   if (emptyChoice) {
@@ -22,7 +24,12 @@ export const getMetadataFieldValue = (descriptor, entity) => {
   ) {
     return entity.data[descriptor.field_name]
   }
+  // Task descriptors live only in the task's own `data`. Never fall back to
+  // the linked entity's metadata (entity_data), or a same-named entity column
+  // (e.g. a "reviewer" on both Shot and the task type) would leak its value
+  // into the task column.
   if (
+    descriptor.entity_type !== 'Task' &&
     entity.entity_data &&
     descriptor.field_name in entity.entity_data &&
     entity.entity_data[descriptor.field_name] != null
@@ -77,3 +84,11 @@ export const isSupervisorInDepartments = (
       user.departments.some(department => departments.includes(department)))
   )
 }
+
+// CSV exports list the descriptor columns by name, in the header and in the
+// lines alike. A production stored from the single-project payload has no
+// descriptors key.
+export const getExportDescriptors = (production, entityType) =>
+  sortByName(
+    (production.descriptors || []).filter(d => d.entity_type === entityType)
+  )

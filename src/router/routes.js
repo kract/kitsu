@@ -95,52 +95,42 @@ export const routes = [
     name: 'home',
     component: Main,
 
-    beforeEnter: (to, from, next) => {
+    beforeEnter: async (to, from) => {
       const browser = Bowser.getParser(window.navigator.userAgent)
       const isValidBrowser = browser.satisfies({
         // see https://vitejs.dev/guide/build.html#browser-compatibility + ES2020 support
         chrome: '>=87',
         firefox: '>=79',
-        edge: '>90',
+        edge: '>=91',
         vivaldi: '>=3.5',
         opera: '>=73',
         safari: '>=14'
       })
       if (!isValidBrowser) {
-        return next({ name: 'wrong-browser' })
+        return { name: 'wrong-browser' }
       }
 
-      auth.requireAuth(to, from, nextPath => {
-        if (nextPath) {
-          next(nextPath)
-        } else {
-          timezone.setTimezone()
-          lang.setLocale(userStore.state.user.locale)
-          sentry.setContext(
-            peopleStore.state.organisation,
-            userStore.state.user
-          )
-          if (store.state.productions.openProductions.length === 0) {
-            init()
-              .then(ready => {
-                if (!ready) return
-                if (!userStore.getters.isCurrentUserArtist(userStore.state)) {
-                  next({ name: 'open-productions' })
-                } else {
-                  next({ name: 'todos' })
-                }
-              })
-              .catch(() => next({ name: 'server-down' }))
-          } else {
-            store.commit('DATA_LOADING_END')
-            if (!userStore.getters.isCurrentUserArtist(userStore.state)) {
-              next({ name: 'open-productions' })
-            } else {
-              next({ name: 'todos' })
-            }
-          }
+      const redirect = await auth.requireAuth(to, from)
+      if (redirect) return redirect
+
+      timezone.setTimezone()
+      lang.setLocale(userStore.state.user.locale)
+      sentry.setContext(peopleStore.state.organisation, userStore.state.user)
+
+      if (store.state.productions.openProductions.length === 0) {
+        try {
+          const ready = await init()
+          if (!ready) return false
+        } catch {
+          return { name: 'server-down' }
         }
-      })
+      } else {
+        store.commit('DATA_LOADING_END')
+      }
+
+      return userStore.getters.isCurrentUserArtist(userStore.state)
+        ? { name: 'todos' }
+        : { name: 'open-productions' }
     }
   },
 
@@ -148,65 +138,55 @@ export const routes = [
     path: '/',
     component: Main,
 
-    beforeEnter: (to, from, next) => {
-      auth.requireAuth(to, from, nextPath => {
-        if (nextPath) {
-          next(nextPath)
-        } else {
-          timezone.setTimezone()
-          lang.setLocale(userStore.state.user.locale)
-          sentry.setContext(
-            peopleStore.state.organisation,
-            userStore.state.user
-          )
-          const isSupervisorOrManager =
-            userStore.getters.isCurrentUserManager(userStore.state) ||
-            userStore.getters.isCurrentUserSupervisor(userStore.state)
-          const isProhibited =
-            (!userStore.getters.isCurrentUserAdmin(userStore.state) &&
-              to?.matched.some(record => record.meta.requiresAdmin)) ||
-            (!isSupervisorOrManager &&
-              to?.matched.some(
-                record => record.meta.requiresSupervisorOrManager
-              ))
-          if (taskTypeStore.state.taskTypes.length === 0) {
-            init()
-              .then(ready => {
-                store.commit('DATA_LOADING_END')
-                if (!ready) return
-                if (isProhibited) {
-                  next({ name: 'not-found' })
-                } else {
-                  next()
-                }
-              })
-              .catch(() => {
-                store.commit('DATA_LOADING_END')
-                next({ name: 'server-down' })
-              })
-          } else {
-            store.commit('DATA_LOADING_END')
-            if (isProhibited) {
-              next({ name: 'not-found' })
-            } else {
-              next()
-            }
-          }
+    beforeEnter: async (to, from) => {
+      const redirect = await auth.requireAuth(to, from)
+      if (redirect) return redirect
+
+      timezone.setTimezone()
+      lang.setLocale(userStore.state.user.locale)
+      sentry.setContext(peopleStore.state.organisation, userStore.state.user)
+
+      const isSupervisorOrManager =
+        userStore.getters.isCurrentUserManager(userStore.state) ||
+        userStore.getters.isCurrentUserSupervisor(userStore.state)
+      const isProhibited =
+        (!userStore.getters.isCurrentUserAdmin(userStore.state) &&
+          to?.matched.some(record => record.meta.requiresAdmin)) ||
+        (!isSupervisorOrManager &&
+          to?.matched.some(
+            record => record.meta.requiresSupervisorOrManager
+          )) ||
+        (userStore.getters.isCurrentUserClient(userStore.state) &&
+          to?.matched.some(record => record.meta.forbiddenForClient))
+
+      if (taskTypeStore.state.taskTypes.length === 0) {
+        try {
+          const ready = await init()
+          store.commit('DATA_LOADING_END')
+          if (!ready) return false
+        } catch {
+          store.commit('DATA_LOADING_END')
+          return { name: 'server-down' }
         }
-      })
+      } else {
+        store.commit('DATA_LOADING_END')
+      }
+
+      if (isProhibited) return { name: 'not-found' }
     },
 
     children: [
       {
         path: 'asset-library',
         component: AssetLibrary,
-        name: 'asset-library'
+        name: 'asset-library',
+        meta: { title: 'library.asset_library', forbiddenForClient: true }
       },
 
       {
         path: 'asset-types',
         name: 'asset-types',
-        meta: { requiresAdmin: true },
+        meta: { title: 'asset_types.title', requiresAdmin: true },
         component: AssetTypes
       },
 
@@ -214,60 +194,60 @@ export const routes = [
         path: 'backgrounds',
         component: Backgrounds,
         name: 'backgrounds',
-        meta: { requiresAdmin: true }
+        meta: { title: 'backgrounds.title', requiresAdmin: true }
       },
 
       {
         path: 'bots',
         component: Bots,
         name: 'bots',
-        meta: { requiresAdmin: true }
+        meta: { title: 'bots.title', requiresAdmin: true }
       },
 
       {
         path: 'departments',
         name: 'departments',
-        meta: { requiresAdmin: true },
+        meta: { title: 'departments.title', requiresAdmin: true },
         component: Departments
       },
 
       {
         path: 'studios',
         name: 'studios',
-        meta: { requiresAdmin: true },
+        meta: { title: 'studios.title', requiresAdmin: true },
         component: Studios
       },
 
       {
         path: 'project-templates',
         name: 'project-templates',
-        meta: { requiresAdmin: true },
+        meta: { title: 'project_templates.title', requiresAdmin: true },
         component: ProjectTemplates
       },
       {
         path: 'project-templates/:template_id',
         name: 'project-template-settings',
-        meta: { requiresAdmin: true },
+        meta: { title: 'project_templates.title', requiresAdmin: true },
         component: ProjectTemplateSettings
       },
 
       {
         path: 'salary-scale',
         name: 'salary-scale',
-        meta: { requiresAdmin: true },
+        meta: { title: 'budget.salary_scale_title', requiresAdmin: true },
         component: SalaryScale
       },
 
       {
         name: 'custom-actions',
-        meta: { requiresAdmin: true },
+        meta: { title: 'custom_actions.title', requiresAdmin: true },
         path: 'custom-actions',
         component: CustomActions
       },
 
       {
         name: 'status-automations',
-        meta: { requiresAdmin: true },
+        meta: { title: 'status_automations.title', requiresAdmin: true },
         path: 'status-automations',
         component: StatusAutomations
       },
@@ -275,17 +255,20 @@ export const routes = [
       {
         name: 'software-licenses',
         path: 'software-licenses',
+        meta: { title: 'software_licenses.title', requiresAdmin: true },
         component: SoftwareLicenses
       },
 
       {
         name: 'hardware-items',
         path: 'hardware-items',
+        meta: { title: 'hardware_items.title', requiresAdmin: true },
         component: HardwareItems
       },
 
       {
         name: 'notifications',
+        meta: { title: 'notifications.title' },
         path: 'notifications',
         component: Notifications
       },
@@ -293,7 +276,8 @@ export const routes = [
       {
         path: 'all-tasks',
         component: AllTasks,
-        name: 'all-tasks'
+        name: 'all-tasks',
+        meta: { title: 'tasks.all_tasks', forbiddenForClient: true }
       },
 
       {
@@ -305,52 +289,60 @@ export const routes = [
       {
         path: 'new-production',
         component: NewProduction,
-        name: 'new-production'
+        name: 'new-production',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'entity-search',
         component: EntitySearch,
-        name: 'entity-search'
+        name: 'entity-search',
+        meta: { title: 'search.title', forbiddenForClient: true }
       },
 
       {
         path: 'entity-chats',
         component: EntityChats,
-        name: 'entity-chats'
+        name: 'entity-chats',
+        meta: { title: 'chats.title', forbiddenForClient: true }
       },
 
       {
         path: 'people',
         component: People,
         name: 'people',
-        meta: { requiresAdmin: true }
+        meta: { title: 'people.title', requiresAdmin: true }
       },
 
       {
         path: 'people/:person_id',
         component: Person,
-        name: 'person'
+        name: 'person',
+        meta: { title: 'people.title', forbiddenForClient: true }
       },
 
       {
         path: '/main-schedule',
         component: MainSchedule,
         name: 'main-schedule',
-        meta: { requiresAdmin: true }
+        meta: { title: 'schedule.title_main', requiresAdmin: true }
       },
 
       {
         path: '/team-schedule',
         component: TeamSchedule,
         name: 'team-schedule',
-        meta: { requiresSupervisorOrManager: true }
+        meta: {
+          title: 'team_schedule.title_main',
+          requiresSupervisorOrManager: true
+        }
       },
 
       {
         path: '/timesheets',
         component: Timesheets,
         name: 'timesheets',
+        meta: { title: 'timesheets.title', forbiddenForClient: true },
         children: [
           {
             path: 'year/:year',
@@ -399,119 +391,139 @@ export const routes = [
         path: '/logs',
         component: Logs,
         name: 'logs',
-        meta: { requiresAdmin: true }
+        meta: { title: 'logs.title', requiresAdmin: true }
       },
 
       {
         path: 'profile',
         component: Profile,
-        name: 'profile'
+        name: 'profile',
+        meta: { title: 'profile.title' }
       },
 
       {
         path: '/plugins/:plugin_id',
         component: Plugin,
-        name: 'plugin'
+        name: 'plugin',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'settings',
         component: Settings,
         name: 'settings',
-        meta: { requiresAdmin: true }
+        meta: { title: 'settings.title', requiresAdmin: true }
       },
 
       {
         name: 'task-types',
-        meta: { requiresAdmin: true },
+        meta: { title: 'task_types.title', requiresAdmin: true },
         path: 'task-types',
         component: TaskTypes
       },
 
       {
         name: 'task-status',
-        meta: { requiresAdmin: true },
+        meta: { title: 'task_status.title', requiresAdmin: true },
         path: 'task-status',
         component: TaskStatus
       },
       {
         path: 'my-tasks',
         component: Todos,
-        name: 'todos'
+        name: 'todos',
+        meta: { title: 'tasks.my_tasks', forbiddenForClient: true }
       },
 
       {
         path: 'my-checks',
         component: MyChecks,
-        name: 'checks'
+        name: 'checks',
+        meta: { title: 'tasks.my_checks', forbiddenForClient: true }
       },
 
       {
         path: 'productions',
         component: Productions,
         name: 'productions',
-        meta: { requiresAdmin: true }
+        meta: { title: 'productions.title', requiresAdmin: true }
       },
 
       {
         path: 'productions/:production_id/team',
         component: Team,
-        name: 'team'
+        name: 'team',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'productions/:production_id/budget',
         component: Budget,
-        name: 'budget'
+        name: 'budget',
+        meta: { requiresAdmin: true }
       },
 
       {
         path: 'news-feed',
         component: ProductionNewsFeed,
         name: 'newsfeed',
-        meta: { requiresAdmin: true }
+        meta: { title: 'news.title', requiresAdmin: true }
       },
 
       {
         path: 'productions/:production_id/news-feed',
         component: ProductionNewsFeed,
-        name: 'news-feed'
+        name: 'news-feed',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'productions/:production_id/schedule',
         component: ProductionSchedule,
-        name: 'schedule'
+        name: 'schedule',
+        meta: { forbiddenForClient: true }
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/schedule',
+        component: ProductionSchedule,
+        name: 'episode-schedule',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'productions/:production_id/production-settings',
         component: ProductionSettings,
-        name: 'production-settings'
+        name: 'production-settings',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'productions/:production_id/brief',
         component: Brief,
-        name: 'brief'
+        name: 'brief',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'productions/:production_id/plugins/:plugin_id',
         component: Plugin,
-        name: 'production-plugin'
+        name: 'production-plugin',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'productions/:production_id/episodes/:episode_id/plugins/:plugin_id',
         component: Plugin,
-        name: 'episode-production-plugin'
+        name: 'episode-production-plugin',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'productions/:production_id/quota',
         component: ProductionQuota,
         name: 'quota',
+        meta: { forbiddenForClient: true },
         children: [
           {
             path: 'month/:year',
@@ -550,6 +562,7 @@ export const routes = [
         path: 'productions/:production_id/episodes/:episode_id/quota',
         component: ProductionQuota,
         name: 'episode-quota',
+        meta: { forbiddenForClient: true },
         children: [
           {
             path: 'month/:year',
@@ -601,6 +614,7 @@ export const routes = [
         path: 'productions/:production_id/breakdown',
         component: Breakdown,
         name: 'breakdown',
+        meta: { forbiddenForClient: true },
         children: [
           {
             path: 'sequences/:sequence_id',
@@ -618,7 +632,8 @@ export const routes = [
       {
         path: 'productions/:production_id/concepts',
         component: Concepts,
-        name: 'concepts'
+        name: 'concepts',
+        meta: { forbiddenForClient: true }
       },
 
       {
@@ -661,24 +676,28 @@ export const routes = [
         path: 'productions/:production_id/episodes',
         component: Episodes,
         name: 'episodes',
+        meta: { forbiddenForClient: true },
         children: []
       },
       {
         path: 'productions/:production_id/episodes/:episode_id',
         component: Episode,
-        name: 'episode'
+        name: 'episode',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'productions/:production_id/sequences/:sequence_id',
         component: Sequence,
-        name: 'sequence'
+        name: 'sequence',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'productions/:production_id/sequences',
         component: Sequences,
-        name: 'sequences'
+        name: 'sequences',
+        meta: { forbiddenForClient: true }
       },
 
       {
@@ -761,6 +780,7 @@ export const routes = [
         path: 'productions/:production_id/episodes/:episode_id/breakdown',
         component: Breakdown,
         name: 'episode-breakdown',
+        meta: { forbiddenForClient: true },
         children: [
           {
             path: 'sequences/:sequence_id',
@@ -821,13 +841,15 @@ export const routes = [
       {
         path: 'productions/:production_id/episodes/:episode_id/sequences',
         component: Sequences,
-        name: 'episode-sequences'
+        name: 'episode-sequences',
+        meta: { forbiddenForClient: true }
       },
 
       {
         path: 'productions/:production_id/episodes/:episode_id/sequences/:sequence_id',
         component: Sequence,
-        name: 'episode-sequence'
+        name: 'episode-sequence',
+        meta: { forbiddenForClient: true }
       },
 
       {
@@ -859,7 +881,8 @@ export const routes = [
         component: TaskType,
         name: 'episodes-task-type',
         meta: {
-          section: 'episodes'
+          section: 'episodes',
+          forbiddenForClient: true
         },
         children: [
           {

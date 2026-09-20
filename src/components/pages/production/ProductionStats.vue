@@ -12,33 +12,38 @@
       <span class="tag">
         {{ stats.amount_done || 0 }} {{ $t('tasks.done') }}
         /
-        {{ stats.amount || 0 }} {{ $t('tasks.tasks') }}
+        {{ stats.amount || 0 }}
+        {{ $t('tasks.number', { count: stats.amount || 0 }) }}
       </span>
       <span class="tag">
         {{ formatDuration(organisation, stats.total_duration) }}
         {{
           isDurationInHours
-            ? $t(
-                'main.hours_spent',
-                formatDuration(organisation, stats.total_duration, false)
-              )
-            : $t(
-                'main.days_spent',
-                formatDuration(organisation, stats.total_duration, false)
-              )
+            ? $t('main.hours_spent', {
+                count: formatDuration(organisation, stats.total_duration, false)
+              })
+            : $t('main.days_spent', {
+                count: formatDuration(organisation, stats.total_duration, false)
+              })
         }}
         /
         {{ formatDuration(organisation, stats.total_estimation) }}
         {{
           isDurationInHours
-            ? $t(
-                'main.hours_estimated',
-                formatDuration(organisation, stats.total_estimation, false)
-              )
-            : $t(
-                'main.days_estimated',
-                formatDuration(organisation, stats.total_estimation, false)
-              )
+            ? $t('main.hours_estimated', {
+                count: formatDuration(
+                  organisation,
+                  stats.total_estimation,
+                  false
+                )
+              })
+            : $t('main.days_estimated', {
+                count: formatDuration(
+                  organisation,
+                  stats.total_estimation,
+                  false
+                )
+              })
         }}
       </span>
     </div>
@@ -46,11 +51,11 @@
       <div
         class="stat"
         :style="{
-          backgroundColor: taskStatusMap.get(statusId).color,
+          backgroundColor: taskStatusMap.get(statusId)?.color,
           width: `${(statsByStatus[statusId] / stats.amount) * 100}%`
         }"
         :key="statusId"
-        :title="`${taskStatusMap.get(statusId).name} - ${statsByStatus[statusId]} tasks`"
+        :title="`${taskStatusMap.get(statusId)?.name} - ${statsByStatus[statusId]} tasks`"
         v-for="statusId in statusIds"
       ></div>
     </div>
@@ -70,7 +75,10 @@
         <div class="task-type-wrapper flexrow-item">
           {{ taskTypeStatsMap[taskType.id].amount_done }}
           /
-          {{ taskTypeStatsMap[taskType.id].amount }} {{ $t('tasks.tasks') }}
+          {{ taskTypeStatsMap[taskType.id].amount }}
+          {{
+            $t('tasks.number', { count: taskTypeStatsMap[taskType.id].amount })
+          }}
         </div>
         <div class="task-type-wrapper flexrow-item">
           {{
@@ -88,22 +96,20 @@
           }}
           {{
             isDurationInHours
-              ? $t(
-                  'main.hours',
-                  formatDuration(
+              ? $t('main.hours', {
+                  count: formatDuration(
                     organisation,
                     taskTypeStatsMap[taskType.id].total_estimation,
                     false
                   )
-                )
-              : $t(
-                  'main.days',
-                  formatDuration(
+                })
+              : $t('main.days', {
+                  count: formatDuration(
                     organisation,
                     taskTypeStatsMap[taskType.id].total_estimation,
                     false
                   )
-                )
+                })
           }}
         </div>
         <div class="color-wrapper flexrow-item">
@@ -111,11 +117,11 @@
             class="stat"
             :style="{
               backgroundColor: taskStatusMap.get(statusStats.task_status_id)
-                .color,
+                ?.color,
               width: `${(statusStats.amount / taskTypeStatsMap[taskType.id].amount) * 100}%`
             }"
             :key="taskType.id + statusStats.task_status_id"
-            :title="`${taskStatusMap.get(statusStats.task_status_id).name} - ${statusStats.amount} tasks`"
+            :title="`${taskStatusMap.get(statusStats.task_status_id)?.name} - ${statusStats.amount} tasks`"
             v-for="statusStats in sortStatuses(
               taskTypeStatsMap[taskType.id].task_statuses
             )"
@@ -199,15 +205,19 @@ const statsByStatus = computed(() => {
 })
 
 const statusIds = computed(() =>
-  Object.keys(statsByStatus.value).sort(
-    (a, b) =>
-      taskStatusMap.value.get(a).priority < taskStatusMap.value.get(b).priority
-  )
+  Object.keys(statsByStatus.value)
+    .filter(statusId => taskStatusMap.value.has(statusId))
+    .sort(
+      (a, b) =>
+        taskStatusMap.value.get(a)?.priority <
+        taskStatusMap.value.get(b)?.priority
+    )
 )
 
 const taskTypes = computed(() =>
   Object.keys(taskTypeStatsMap.value)
     .map(taskTypeId => taskTypeMap.value.get(taskTypeId))
+    .filter(Boolean)
     .sort((a, b) => {
       if (a.for_entity !== b.for_entity) {
         return ENTITY_PRIORITY[a.for_entity] > ENTITY_PRIORITY[b.for_entity]
@@ -225,11 +235,13 @@ const expandStats = () => {
 }
 
 const sortStatuses = statuses =>
-  statuses.sort(
-    (a, b) =>
-      taskStatusMap.value.get(a.task_status_id).priority <
-      taskStatusMap.value.get(b.task_status_id).priority
-  )
+  statuses
+    .filter(status => taskStatusMap.value.has(status.task_status_id))
+    .sort(
+      (a, b) =>
+        taskStatusMap.value.get(a.task_status_id)?.priority <
+        taskStatusMap.value.get(b.task_status_id)?.priority
+    )
 </script>
 
 <style lang="scss" scoped>

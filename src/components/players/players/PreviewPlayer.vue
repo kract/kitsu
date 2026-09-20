@@ -86,6 +86,7 @@
               name="main"
               :nb-frames="nbFrames"
               :object-background-url="objectBackgroundUrl"
+              :picture-background-color="pictureBackgroundColor"
               :preview="currentPreview"
               :style="{
                 position: isComparisonOverlay ? 'absolute' : 'static'
@@ -116,6 +117,7 @@
               :is-muted="true"
               :is-repeating="isRepeating"
               :margin-bottom="marginBottom"
+              :picture-background-color="pictureBackgroundColor"
               :preview="comparisonPreview"
               :style="{
                 opacity: overlayOpacity
@@ -146,7 +148,7 @@
         <task-info
           ref="task-info-player"
           class="flexrow-item task-info-column"
-          :current-frame="currentFrame"
+          :current-frame="taskInfoFrame"
           :current-parent-preview="currentPreview"
           :entity-type="entityType"
           :extendable="false"
@@ -158,7 +160,7 @@
           @comment-added="$emit('comment-added')"
           @time-code-clicked="timeCodeClicked"
           v-show="!isCommentsHidden"
-          v-if="!readOnly"
+          v-if="!readOnly && task.id"
         />
       </div>
     </div>
@@ -218,8 +220,6 @@
           :is-comparing="isComparing"
           :is-comparison-enabled="isComparisonEnabled"
           :is-concept="isConcept"
-          :is-movie="isMovie"
-          :is-sound="isSound"
           :light="light"
           :preview-file-options="previewFileOptions"
           :show-panel="fullScreen"
@@ -252,6 +252,7 @@
             :is-movie="isMovie"
             :is-object-background="isObjectBackground"
             :is-picture="isPicture"
+            :is-transparent-picture="isTransparentPicture"
             :is-typing="isTyping"
             :is-zoom-pan="false"
             :light="light"
@@ -263,12 +264,14 @@
             :read-only="readOnly"
             :show-comments-button="showCommentsButton"
             :text-color="textColor"
+            :text-size="textSize"
             v-model:current-background="currentBackground"
             v-model:current-shape="currentShape"
             v-model:is-environment-skybox="isEnvironmentSkybox"
             v-model:is-eraser-mode-on="isEraserModeOn"
             v-model:is-onion-skin-on="isOnionSkinOn"
             v-model:onion-skin-frames="onionSkinFrames"
+            v-model:picture-background-color="pictureBackgroundColor"
             v-model:is-shape-mode="isShapeMode"
             v-model:is-wireframe="isWireframe"
             @annotation-displayed-clicked="onAnnotationDisplayedClicked"
@@ -276,6 +279,7 @@
             @change-pencil-width="onChangePencilWidth"
             @change-shape="setShapeTool"
             @change-text-color="onChangeTextColor"
+            @change-text-size="onChangeTextSize"
             @comment-clicked="onCommentClicked"
             @delete-clicked="onDeleteClicked"
             @erase-clicked="onEraseClicked"
@@ -390,8 +394,6 @@
             :is-comparing="isComparing"
             :is-comparison-enabled="isComparisonEnabled"
             :is-concept="isConcept"
-            :is-movie="isMovie"
-            :is-sound="isSound"
             :light="light"
             :preview-file-options="previewFileOptions"
             :show-toggle="false"
@@ -435,7 +437,9 @@
           :preview-file="preview"
           :index="index"
           :is-selected="currentPreview.id === preview.id"
+          :can-validate="canValidatePreviews"
           @selected="onRevisionPreviewSelected(index + 1)"
+          @validation-status-clicked="onValidationStatusClicked(preview)"
           @preview-dropped="onRevisionPreviewDropped"
         />
       </div>
@@ -470,6 +474,7 @@ import { useComparison } from '@/composables/players/comparison'
 import { useOnionSkin } from '@/composables/players/onionSkin'
 import { usePreviewShortcuts } from '@/composables/players/previewShortcuts'
 import { usePlayerTransport } from '@/composables/players/transport'
+import func from '@/lib/func'
 import { getEntityPath } from '@/lib/path'
 import { mergeAnnotationsByFrame } from '@/lib/players/annotation'
 import localPreferences from '@/lib/preferences'
@@ -482,7 +487,8 @@ import {
   isModelPreview,
   isMoviePreview,
   isPicturePreview,
-  isSoundPreview
+  isSoundPreview,
+  isTransparentPicturePreview
 } from '@/lib/preview'
 import {
   DEFAULT_FPS,
@@ -653,6 +659,7 @@ const maxDuration = ref('00:00:00:00')
 const movieDimensions = ref({ width: 1920, height: 1080 })
 const objectBackgroundUrl = ref(null)
 const pencilPalette = ref(['huge', 'big', 'medium', 'small', 'tiny'])
+const pictureBackgroundColor = ref('#000000')
 const videoDuration = ref(0)
 const width = ref(0)
 
@@ -662,6 +669,9 @@ const width = ref(0)
 
 const assetMap = computed(() => store.getters.assetMap)
 const isCurrentUserArtist = computed(() => store.getters.isCurrentUserArtist)
+const canValidatePreviews = computed(() =>
+  store.getters.canValidatePreviewFiles(props.task)
+)
 const isTVShow = computed(() => store.getters.isTVShow)
 const organisation = computed(() => store.getters.organisation)
 const productionMap = computed(() => store.getters.productionMap)
@@ -711,6 +721,7 @@ const {
   pencilColor,
   pencilWidth,
   textColor,
+  textSize,
   addText,
   addTypeArea,
   removeTypeArea,
@@ -725,6 +736,7 @@ const {
   onChangePencilColor,
   onChangePencilWidth,
   onChangeTextColor,
+  onChangeTextSize,
   _resetColor,
   _resetPencil,
   resetPencilConfiguration,
@@ -770,6 +782,21 @@ const currentFrameLabel = computed(() => {
   const frame = Math.min(nbFrames.value, currentFrame.value)
   return formatFrame(frame + 1)
 })
+
+// TaskInfo renders the frame chip in its template: feeding it the live
+// frame re-rendered the whole comments panel dozens of times a second
+// during playback, even while hidden (v-show). Freeze the prop while
+// playing or hidden; it refreshes on pause and when the panel opens.
+const taskInfoFrame = ref(0)
+watch(
+  [currentFrame, isPlaying, isCommentsHidden],
+  () => {
+    if (!isPlaying.value && !isCommentsHidden.value) {
+      taskInfoFrame.value = currentFrame.value
+    }
+  },
+  { immediate: true }
+)
 
 const currentPreview = computed(() => {
   if (
@@ -878,8 +905,11 @@ const frameDuration = computed(
 
 // Production start frame of the displayed shot (data.frame_in, e.g. 1001).
 // Forwarded to the playback bar / progress bar as a display-only offset.
+// Opt-in through the production option; a missing field means disabled.
 const frameStart = computed(() =>
-  getEntityFrameStart(shotMap.value.get(props.task?.entity_id))
+  currentProduction.value?.is_frame_in_numbering
+    ? getEntityFrameStart(shotMap.value.get(props.task?.entity_id))
+    : undefined
 )
 
 const extension = computed(() =>
@@ -891,6 +921,9 @@ const isReady = computed(
   () => !currentPreview.value?.status || currentPreview.value.status === 'ready'
 )
 const isPicture = computed(() => isPicturePreview(extension.value))
+const isTransparentPicture = computed(() =>
+  isTransparentPicturePreview(extension.value)
+)
 const isMovie = computed(() => isMoviePreview(extension.value))
 const is3DModel = computed(() => isModelPreview(extension.value))
 const isSound = computed(() => isSoundPreview(extension.value))
@@ -1002,6 +1035,10 @@ const getClientX = event =>
 // Methods
 
 const setVideoFrameContext = frame => {
+  // NaN survives both Math.min and the equality guard below (NaN !== NaN is
+  // always true), and reaches the progress bar and video.currentTime, whose
+  // setters throw on non-finite values.
+  if (!Number.isFinite(frame)) return
   frame = Math.min(frame, nbFrames.value - 1)
   if (currentFrame.value !== frame) {
     const time = frame * frameDuration.value
@@ -1018,14 +1055,7 @@ const setVideoFrameContext = frame => {
     if (!isPlaying.value) loadAnnotation()
     if (isPlaying.value && hasTrimEnd.value && frame >= handleOut.value) {
       if (isRepeating.value) {
-        // Loop from the frame START (see the play() jump) and repaint the
-        // bar at the loop target right away: on this tick the playing
-        // channel has already filled past the handle-out marker.
-        const startTime = trimStartFrame.value * frameDuration.value
-        pendingTrimSeek = true
-        previewViewer.value.setCurrentTimeRaw(startTime)
-        comparisonViewer.value?.setCurrentTimeRaw(startTime)
-        progress.value?.updateProgressBar(trimStartFrame.value - 1)
+        seekTrimStart()
       } else {
         pause()
         setCurrentFrame(handleOut.value)
@@ -1062,6 +1092,7 @@ const onSubPreviewsWheel = event => {
 }
 
 const setCurrentFrame = frame => {
+  if (!Number.isFinite(frame)) return
   if (currentFrame.value !== frame) {
     setVideoFrameContext(frame)
     previewViewer.value.setCurrentFrame(frame)
@@ -1128,8 +1159,9 @@ const changeMaxDuration = duration => {
 
 const getCurrentTime = () => {
   if (!isMovie.value) return 0
-  const time = roundToFrame(currentTimeRaw.value, fps.value)
-  return Number(time.toPrecision(4))
+  // 4-decimal rounding only: toPrecision(4) keeps 4 significant digits and
+  // quantized times past 100s, landing annotations on neighbouring frames.
+  return roundToFrame(currentTimeRaw.value, fps.value)
 }
 
 const getCurrentFrame = () => {
@@ -1138,6 +1170,26 @@ const getCurrentFrame = () => {
   }
   const time = roundToFrame(currentTimeRaw.value, fps.value) || 0
   return Math.round(time / frameDuration.value) + 1
+}
+
+// Restart seek shared by the manual replay and the repeat loop. Seeks the
+// START of the trim frame, not the usual mid-frame (setCurrentFrame):
+// starting mid-frame only shows half of the handle-in frame, which reads
+// as playing one frame late. Also wraps the displayed frame right away:
+// the first playback emission after the seek lands is ceil+1-based
+// (~start + 2), so the counter would visibly restart a few frames in.
+const seekTrimStart = () => {
+  const startTime = trimStartFrame.value * frameDuration.value
+  pendingTrimSeek = true
+  previewViewer.value.setCurrentTimeRaw(startTime)
+  comparisonViewer.value?.setCurrentTimeRaw(startTime)
+  currentFrame.value = trimStartFrame.value
+  currentTimeRaw.value = startTime
+  currentTime.value = formatTime(startTime, fps.value)
+  emit('frame-updated', trimStartFrame.value)
+  // park the fill ON the start frame (paused convention), so the playback
+  // repaints that resume at ~start + 2 read as a continuous 1, 2, 3…
+  progress.value?.updateProgressBar(trimStartFrame.value)
 }
 
 const play = () => {
@@ -1153,13 +1205,7 @@ const play = () => {
         currentFrame.value >= endFrame ||
         currentFrame.value < trimStartFrame.value
       ) {
-        // Seek the START of the trim frame, not the usual mid-frame
-        // (setCurrentFrame): starting mid-frame only shows half of the
-        // handle-in frame, which reads as playing one frame late.
-        const startTime = trimStartFrame.value * frameDuration.value
-        pendingTrimSeek = true
-        previewViewer.value.setCurrentTimeRaw(startTime)
-        comparisonViewer.value?.setCurrentTimeRaw(startTime)
+        seekTrimStart()
       }
       previewViewer.value.play()
       if (comparisonViewer.value && isComparing.value) {
@@ -1410,7 +1456,6 @@ const onRepeatClicked = () => {
 const onToggleSoundClicked = () => {
   clearFocus()
   isMuted.value = !isMuted.value
-  localPreferences.setPreference('player:muted', isMuted.value)
 }
 
 // Screen
@@ -1618,9 +1663,10 @@ const onAnnotationDisplayedClicked = () => {
 const saveAnnotations = () => {
   let currentTimeVal = 0
   if (isMovie.value) {
-    currentTimeVal = currentFrame.value * frameDuration.value
-    currentTimeVal = roundToFrame(currentTimeVal, fps.value)
-    currentTimeVal = Number(currentTimeVal.toPrecision(4))
+    currentTimeVal = roundToFrame(
+      currentFrame.value * frameDuration.value,
+      fps.value
+    )
   }
   const annotation = getAnnotation(currentTimeVal)
   const newAnnotations = getNewAnnotations(
@@ -1672,7 +1718,14 @@ const loadComparisonAnnotation = time => {
   }
   let annotation = null
   if (isMovie.value) {
-    annotation = anns.find(a => a.time === time)
+    // Tolerant match like getAnnotation: callers derive `time` from raw
+    // frame math while stored times are rounded (legacy ones not even
+    // that), so strict float equality mostly missed and the comparison
+    // overlay stayed empty.
+    const target = roundToFrame(time, fps.value)
+    annotation = anns.find(
+      a => Math.abs(roundToFrame(a.time, fps.value) - target) < 0.0001
+    )
   } else if (isPicture.value) {
     annotation = anns.find(a => a.time === 0)
   }
@@ -1751,6 +1804,9 @@ const snapshotTitle = identity =>
 // annotation's frame with its drawing composited on top.
 const extractVideoAnnotationSnapshots = async ({ withLabel = false } = {}) => {
   const files = []
+  // The loop below seeks the player around (extractVideoFrame goes through
+  // setCurrentFrame), so save the user's frame now to restore it at the end.
+  const cur = currentFrame.value
   const sortedAnnotations = annotations.value.sort((a, b) => {
     return parseInt(b.frame) < parseInt(a.frame) ? 1 : -1
   })
@@ -1767,9 +1823,15 @@ const extractVideoAnnotationSnapshots = async ({ withLabel = false } = {}) => {
       await getFileFromCanvas(canvas, snapshotFilename({ revision, frame }))
     )
   }
-  previewViewer.value.setCurrentFrame(currentFrame.value - 1)
+  // currentFrame is 0-based here (unlike PlaylistPlayer's 1-based label
+  // this restore was copied from): no -1, or the playhead steps back.
+  previewViewer.value.setCurrentFrame(cur)
   nextTick(() => {
+    // Repaint the annotation of the restored frame: the loop used the live
+    // canvas as scratch space, and clearing without reloading left the
+    // user's drawing gone until the next frame change.
     clearCanvas()
+    loadAnnotation()
   })
   return files
 }
@@ -1817,7 +1879,13 @@ const extractPicturePreviewSnapshots = async ({ withLabel = false } = {}) => {
     currentIndex.value = savedIndex
     await new Promise(resolve => setTimeout(resolve, 500))
   }
-  nextTick(() => clearCanvas())
+  // Repaint the current preview's annotation rather than leaving the
+  // live canvas cleared (the drawing otherwise vanishes until the next
+  // preview change).
+  nextTick(() => {
+    clearCanvas()
+    loadAnnotation()
+  })
   return files
 }
 
@@ -1841,20 +1909,24 @@ const getLinkedEntities = concept => {
 
 // Events
 
+// The playlist modal mounts a PlaylistPlayer above this (still mounted)
+// player: while it is open, its instance owns every shortcut.
+const isPlayerActive = () => {
+  const playlistModal = document.getElementById('temp-playlist-modal')
+  const styles = playlistModal && window.getComputedStyle(playlistModal)
+  return !styles || styles.display === 'none'
+}
+
 const { isAltHeld } = usePreviewShortcuts({
   // Escape is not wired — the browser exits fullscreen on it and the
   // useFullScreen listener picks up the resulting fullscreenchange.
+  isActive: isPlayerActive,
   onDelete: () => deleteSelection(),
   onPrevFrame: () => goPreviousFrame(),
   onNextFrame: () => goNextFrame(),
   onFirstFrame: () => goToFirstFrame(),
   onLastFrame: () => goToLastFrame(),
-  onPlayPause: () => {
-    // Don't toggle play/pause while a shared playlist modal is open.
-    const playlistModal = document.getElementById('temp-playlist-modal')
-    const styles = playlistModal && window.getComputedStyle(playlistModal)
-    if (!styles || styles.display === 'none') togglePlayPause()
-  },
+  onPlayPause: () => togglePlayPause(),
   onPrevAnnotation: () => goPreviousDrawing(),
   onNextAnnotation: () => goNextDrawing(),
   onAnnotate: () => {
@@ -1968,6 +2040,14 @@ const changeCurrentPreview = previewFile => {
 
 const onRemovePreviewClicked = () => {
   emit('remove-extra-preview', currentPreview.value)
+}
+
+const onValidationStatusClicked = previewFile => {
+  const next = { neutral: 'validated', validated: 'rejected' }
+  store.dispatch('updatePreviewFileValidationStatus', {
+    previewFile,
+    status: next[previewFile.validation_status] || 'neutral'
+  })
 }
 
 const onPreviousClicked = () => {
@@ -2280,6 +2360,20 @@ watch(taskTypeId, () => {
   setDefaultComparisonPreview()
 })
 
+// The comparison lookup map is non-reactive and was only rebuilt on
+// task-type changes: switching tasks in TaskInfo (same task type id) or
+// receiving a new revision left it resolving stale preview files, which
+// blanked the comparison viewer. Rebuild it whenever the payload changes.
+watch(
+  () => props.entityPreviewFiles,
+  () => {
+    resetPreviewFileMap()
+    if (previewToCompareId.value) {
+      previewToCompare.value = resolvePreviewToCompare(previewToCompareId.value)
+    }
+  }
+)
+
 watch(isComparing, () => {
   endAnnotationSaving()
   if (!isComparing.value) {
@@ -2329,8 +2423,9 @@ watch(isTyping, () => {
     isAnnotationsDisplayed.value = true
   }
   const clickarea =
-    canvasWrapper.value.getElementsByClassName('upper-canvas')[0]
-  if (isTyping.value && clickarea) {
+    canvasWrapper.value?.getElementsByClassName('upper-canvas')[0]
+  if (!clickarea) return
+  if (isTyping.value) {
     clickarea.addEventListener('dblclick', addText)
   } else {
     clickarea.removeEventListener('dblclick', addText)
@@ -2346,8 +2441,8 @@ watch(isAnnotationsDisplayed, () => {
 
 watch(isComparisonOverlay, () => {
   nextTick(() => {
-    previewViewer.value.resize()
-    comparisonViewer.value.resize()
+    previewViewer.value?.resize()
+    comparisonViewer.value?.resize()
   })
 })
 
@@ -2371,8 +2466,15 @@ watch(speed, () => {
 })
 
 watch(volume, () => {
-  previewViewer.value.setVolume(volume.value)
+  previewViewer.value?.setVolume(volume.value)
   localPreferences.setPreference('player:volume', volume.value)
+})
+
+// Persist through a watcher: ButtonSound drives isMuted via v-model and
+// never emits change-sound, so a click handler on the toggle chain never
+// runs and the preference was never written.
+watch(isMuted, () => {
+  localPreferences.setPreference('player:muted', isMuted.value)
 })
 
 // Lifecycle
@@ -2391,13 +2493,13 @@ onMounted(() => {
   }
 
   if (isMuted.value) {
-    previewViewer.value.setVolume(0)
+    previewViewer.value?.setVolume(0)
   } else {
     volume.value = localPreferences.getIntPreference(
       'player:volume',
       volume.value
     )
-    previewViewer.value.setVolume(volume.value)
+    previewViewer.value?.setVolume(volume.value)
   }
 
   reloadAnnotations()
@@ -2409,10 +2511,14 @@ onMounted(() => {
   // viewer's transform through the panzoom-changed sync.
   previewViewer.value?.resumeZoom()
 
-  containerResizeObserver = new ResizeObserver(() => {
+  // Debounced: a live window resize (or the fullscreen transition) fires
+  // this continuously, and each tick cleared and rebuilt the annotation
+  // objects (async PSStroke deserialization).
+  const onContainerResized = func.debounce(() => {
     resetPlayerPositions()
     if (isPicture.value || isMovie.value) loadAnnotation()
-  })
+  }, 200)
+  containerResizeObserver = new ResizeObserver(onContainerResized)
   containerResizeObserver.observe(container.value)
 
   window.addEventListener('resize', onWindowResize)

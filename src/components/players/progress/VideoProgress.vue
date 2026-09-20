@@ -203,7 +203,8 @@ const hoverFrame = ref(0)
 const isFrameNumberVisible = ref(false)
 const progress = ref(null)
 const progressDragging = ref(false)
-const tileGeometry = ref(null)
+// undefined while the sprite loads, null when there is none.
+const tileGeometry = ref(undefined)
 const width = ref(0)
 
 // Mouse scratch state; not reactive — written from event handlers, never read by template
@@ -265,21 +266,31 @@ const zoomLevel = ref(1)
 const viewStartFrame = ref(0)
 
 const visibleFrames = computed(() => props.nbFrames / zoomLevel.value)
-const effectiveFrameSize = computed(() => width.value / visibleFrames.value)
+// A hidden or not-yet-measured bar has a width of 0, and a preview whose
+// metadata is still loading has no frame: both divisions would yield 0 / 0
+// and poison every position with NaN.
+const effectiveFrameSize = computed(() =>
+  visibleFrames.value > 0 ? width.value / visibleFrames.value : 0
+)
 
 const frameToX = frame =>
   (frame - viewStartFrame.value) * effectiveFrameSize.value
-const xToFrame = x => viewStartFrame.value + x / effectiveFrameSize.value
+const xToFrame = x =>
+  effectiveFrameSize.value > 0
+    ? viewStartFrame.value + x / effectiveFrameSize.value
+    : viewStartFrame.value
 
 const clampViewStart = start =>
-  Math.min(Math.max(start, 0), props.nbFrames - visibleFrames.value)
+  Number.isFinite(start)
+    ? Math.min(Math.max(start, 0), props.nbFrames - visibleFrames.value)
+    : 0
 
 const onWheelZoom = event => {
   // Zoom is a Ctrl+wheel gesture (map-style): a plain wheel keeps
   // scrolling the surrounding widgets/page.
   if (!event.ctrlKey) return
   event.preventDefault()
-  if (props.empty || !props.nbFrames) return
+  if (props.empty || !props.nbFrames || !width.value) return
   const anchorFrame = xToFrame(getClientX(event) - getProgressLeft())
   const factor = event.deltaY < 0 ? 1.25 : 1 / 1.25
   // Never zoom past ~8 visible frames, never below the full clip.
@@ -378,7 +389,7 @@ const onWindowResize = () => {
 watch(
   () => props.previewId,
   () => {
-    tileGeometry.value = null
+    tileGeometry.value = undefined
     if (!props.previewId) return
     const previewId = props.previewId
     const base = props.urlPrefix || '/api'
@@ -403,11 +414,15 @@ const getAnnotationPosition = annotation => {
 let lastProgressFrame = 0
 
 const updateProgressBar = frameNumber => {
+  if (!progress.value || !Number.isFinite(frameNumber)) return
   lastProgressFrame = frameNumber
   const relative = frameNumber - viewStartFrame.value
-  progress.value.value = props.empty
+  const value = props.empty
     ? relative * props.frameDuration
     : (relative + 1) * props.frameDuration
+  // The setter throws on a non-finite value, which would break the whole
+  // render pass, not just the fill.
+  if (Number.isFinite(value)) progress.value.value = value
 }
 
 const startProgressDrag = () => {
@@ -483,6 +498,10 @@ const getMouseFrame = (event, annotation) => {
 }
 
 const doProgressDrag = event => {
+  // The listeners live on `document`, so a drag started on the bar keeps
+  // firing after a preview switch hides it (v-show) or drops its frame
+  // count. Without geometry every position maps to NaN.
+  if (!width.value || !props.nbFrames) return
   if (
     progressDragging.value ||
     handleInDragging.value ||
@@ -524,6 +543,15 @@ const getFrameBackgroundStyle = frame => {
   // preview's stored dimensions, which drift from the file the sprite
   // was built from (source ratio ≠ production ratio, renormalisations).
   const geometry = tileGeometry.value
+  if (geometry === null) {
+    // No sprite for this movie: its thumbnail, rather than a background
+    // URL the browser would request again at every hover.
+    return {
+      background: `url(${base}/pictures/thumbnails/preview-files/${previewId}.png)`,
+      'background-position': '0 0',
+      width: '150px'
+    }
+  }
   const frameWidth =
     geometry?.cellWidth ?? Math.ceil(TILE_CELL_HEIGHT * videoRatio.value)
   const cellCount = geometry?.cellCount ?? 3840

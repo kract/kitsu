@@ -176,6 +176,10 @@
                 :label="$t('productions.fields.is_publish_default')"
                 v-model="params.is_publish_default_for_artists"
               />
+              <combobox-boolean
+                :label="$t('productions.fields.is_frame_in_numbering')"
+                v-model="params.is_frame_in_numbering"
+              />
               <text-field
                 type="number"
                 :step="1"
@@ -280,6 +284,12 @@
                 <th class="descriptor-name">
                   {{ $t('project_templates.fields.name') }}
                 </th>
+                <th
+                  class="descriptor-task-type"
+                  v-if="metadataEntityTab === 'Task'"
+                >
+                  {{ $t('tasks.fields.task_type') }}
+                </th>
                 <th class="descriptor-type">{{ $t('main.type') }}</th>
                 <th class="descriptor-for-client">
                   {{ $t('assets.fields.hidden_from_client') }}
@@ -300,6 +310,12 @@
                 :key="descriptor.__index"
               >
                 <td class="descriptor-name">{{ descriptor.name }}</td>
+                <td
+                  class="descriptor-task-type"
+                  v-if="metadataEntityTab === 'Task'"
+                >
+                  {{ taskTypeMap.get(descriptor.task_type_id)?.name || '—' }}
+                </td>
                 <td class="descriptor-type">{{ descriptor.data_type }}</td>
                 <td class="descriptor-for-client">
                   {{ descriptor.for_client ? $t('main.yes') : $t('main.no') }}
@@ -353,6 +369,7 @@
       :is-error="errors.saveDescriptor"
       :descriptor-to-edit="descriptorToEdit"
       :entity-type="metadataEntityTab"
+      :task-types="metadataEntityTab === 'Task' ? templateTaskTypes : []"
       @cancel="modals.addMetadata = false"
       @confirm="confirmMetadataModal"
     />
@@ -395,7 +412,14 @@ const router = useRouter()
 const store = useStore()
 
 const activeTab = ref('parameters')
-const VALID_METADATA_ENTITIES = ['Asset', 'Shot', 'Sequence', 'Episode', 'Edit']
+const VALID_METADATA_ENTITIES = [
+  'Asset',
+  'Shot',
+  'Sequence',
+  'Episode',
+  'Edit',
+  'Task'
+]
 const initialMetadataEntity = VALID_METADATA_ENTITIES.includes(
   route.query.entity
 )
@@ -414,7 +438,8 @@ const metadataEntityTabs = computed(() => [
   { label: t('shots.title'), name: 'Shot' },
   { label: t('sequences.title'), name: 'Sequence' },
   { label: t('episodes.title'), name: 'Episode' },
-  { label: t('edits.title'), name: 'Edit' }
+  { label: t('edits.title'), name: 'Edit' },
+  { label: t('tasks.tasks'), name: 'Task' }
 ])
 
 const descriptorsForEntity = computed(() => {
@@ -465,6 +490,7 @@ const params = ref({
   is_set_preview_automated: 'false',
   is_single_preview_per_revision: 'false',
   is_publish_default_for_artists: 'false',
+  is_frame_in_numbering: 'false',
   max_retakes: 0
 })
 
@@ -478,6 +504,7 @@ const allAssetTypes = computed(() => store.getters.assetTypes || [])
 const allAutomations = computed(() => store.getters.statusAutomations || [])
 const allBackgrounds = computed(() => store.getters.backgrounds || [])
 const departmentMap = computed(() => store.getters.departmentMap || new Map())
+const taskTypeMap = computed(() => store.getters.taskTypeMap || new Map())
 
 const isActiveTab = tab => activeTab.value === tab
 
@@ -531,6 +558,7 @@ const loadTemplateData = async () => {
     is_publish_default_for_artists: tmpl.is_publish_default_for_artists
       ? 'true'
       : 'false',
+    is_frame_in_numbering: tmpl.is_frame_in_numbering ? 'true' : 'false',
     max_retakes: tmpl.max_retakes || 0
   }
   // Build roles map from task status link data (if available from API)
@@ -579,7 +607,8 @@ const saveParameters = async () => {
       is_single_preview_per_revision:
         params.value.is_single_preview_per_revision === 'true',
       is_publish_default_for_artists:
-        params.value.is_publish_default_for_artists === 'true'
+        params.value.is_publish_default_for_artists === 'true',
+      is_frame_in_numbering: params.value.is_frame_in_numbering === 'true'
     })
   } catch {
     errors.parameters = true
@@ -748,6 +777,7 @@ const cleanDescriptors = () =>
   descriptors.value.map(d => ({
     name: d.name,
     entity_type: d.entity_type,
+    task_type_id: d.task_type_id || null,
     data_type: d.data_type,
     choices: d.choices || [],
     for_client: Boolean(d.for_client),
@@ -784,6 +814,7 @@ const openEditDescriptor = index => {
     id: `template-descriptor-${index}`,
     name: d.name,
     data_type: d.data_type,
+    task_type_id: d.task_type_id ?? null,
     for_client: Boolean(d.for_client),
     choices: [...(d.choices || [])],
     departments: [...(d.departments || [])]
@@ -803,6 +834,7 @@ const confirmMetadataModal = async form => {
     name: form.name,
     data_type: form.data_type,
     entity_type: metadataEntityTab.value,
+    task_type_id: form.task_type_id ?? null,
     choices: form.values || [],
     for_client: form.for_client === 'true',
     departments: form.departments || []
@@ -811,6 +843,7 @@ const confirmMetadataModal = async form => {
     if (descriptorToEditIndex.value >= 0) {
       const existing = descriptors.value[descriptorToEditIndex.value]
       entry.entity_type = existing.entity_type
+      entry.task_type_id = form.task_type_id ?? existing.task_type_id
       entry.field_name = existing.field_name
       entry.position = existing.position
       descriptors.value[descriptorToEditIndex.value] = entry
